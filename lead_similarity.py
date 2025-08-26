@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 import chromadb
 from chromadb.utils import embedding_functions
+from datetime import datetime
 
 load_dotenv()
 
@@ -14,6 +15,12 @@ headers = {
     "API-Key": os.getenv('CRM_API_KEY'),
     "Content-Type": "application/json"
 }
+
+client = chromadb.CloudClient(
+  api_key= os.getenv('CHROMADB_API_KEY'),
+  tenant='d2d08375-42ea-4bac-854b-09bac5998a24',
+  database='Daily Digest'
+)
 
 
 def fetch_data(query: str) -> List[Dict]:
@@ -41,17 +48,21 @@ class LeadSimilarityAnalyzer:
 
         self.client = OpenAI(api_key=self.api_key)
 
-        # ChromaDB setup
-        self.chroma_client = chromadb.PersistentClient(path="./lead_embeddings_db")
+        # Use ChromaDB Cloud client
+        self.chroma_client = client
+        
         self.embedding_fn = embedding_functions.OpenAIEmbeddingFunction(
             api_key=self.api_key,
             model_name="text-embedding-ada-002"
         )
 
+        # Get or create collection in ChromaDB Cloud
         self.collection = self.chroma_client.get_or_create_collection(
-            name=os.getenv('CHROMADB_API_KEY'),
+            name="leads_collection",
             embedding_function=self.embedding_fn
         )
+        
+        print(f"[INFO] Connected to ChromaDB Cloud collection: {self.collection.name}")
 
     def _sanitize_metadata(self, metadata: Dict) -> Dict:
         """
@@ -67,23 +78,31 @@ class LeadSimilarityAnalyzer:
 
     def store_lead_embeddings(self, leads: List[Dict], lead_type: str, user_id: int):
         """
-        Store embeddings in ChromaDB if not already stored, with safe metadata.
+        Store embeddings in ChromaDB Cloud if not already stored, with safe metadata.
         """
+        stored_count = 0
+        skipped_count = 0
+        
         for lead in leads:
             lead_id = str(lead.get("id", "")).strip()
             if not lead_id:
                 print(f"[WARNING] Missing Lead ID, skipping: {lead}")
+                skipped_count += 1
                 continue
 
             # Check if already stored
-            existing_doc = self.collection.get(ids=[lead_id])
-            if existing_doc.get("ids"):
-                print(f"[DEBUG] Embedding already exists for Lead ID {lead_id}")
-                continue
+            try:
+                existing_doc = self.collection.get(ids=[lead_id])
+                if existing_doc.get("ids"):
+                    print(f"[DEBUG] Embedding already exists for Lead ID {lead_id}")
+                    continue
+            except Exception as e:
+                print(f"[DEBUG] No existing embedding for Lead ID {lead_id}: {e}")
 
             desc = lead.get("project_description", "")
             if not desc.strip():
                 print(f"[WARNING] No description for Lead ID {lead_id}, skipping.")
+                skipped_count += 1
                 continue
 
             print(f"[DEBUG] Storing embedding for {lead_type} lead {lead_id} (user {user_id})")
@@ -91,14 +110,58 @@ class LeadSimilarityAnalyzer:
                 "lead_type": lead_type,
                 "user_id": user_id,
                 "name": lead.get("name"),
-                "create_date": lead.get("create_date")
+                "create_date": lead.get("create_date"),
+                "lead_id": lead_id,
+                "stored_at": datetime.now().isoformat()
             })
 
-            self.collection.add(
-                ids=[lead_id],
-                documents=[desc],
-                metadatas=[metadata]
+            try:
+                self.collection.add(
+                    ids=[lead_id],
+                    documents=[desc],
+                    metadatas=[metadata]
+                )
+                stored_count += 1
+                print(f"[SUCCESS] Stored embedding for Lead ID {lead_id}")
+            except Exception as e:
+                print(f"[ERROR] Failed to store embedding for Lead ID {lead_id}: {e}")
+                skipped_count += 1
+        
+        print(f"[INFO] Embedding storage complete: {stored_count} stored, {skipped_count} skipped")
+        return stored_count
+
+    def get_stored_leads(self, limit: int = 10):
+        """
+        Retrieve stored leads from ChromaDB for verification.
+        """
+        try:
+            results = self.collection.get(limit=limit)
+            return {
+                "ids": results.get("ids", []),
+                "documents": results.get("documents", []),
+                "metadatas": results.get("metadatas", []),
+                "count": len(results.get("ids", []))
+            }
+        except Exception as e:
+            print(f"[ERROR] Failed to retrieve leads from ChromaDB: {e}")
+            return {"error": str(e)}
+
+    def search_similar_leads(self, query: str, limit: int = 5):
+        """
+        Search for leads similar to a given query using ChromaDB.
+        """
+        try:
+            results = self.collection.query(
+                query_texts=[query],
+                n_results=limit
             )
+            return {
+                "query": query,
+                "results": results
+            }
+        except Exception as e:
+            print(f"[ERROR] Failed to search leads in ChromaDB: {e}")
+            return {"error": str(e)}
 
     def find_interest_matched_new_leads(self, user_id: int, similarity_threshold: float = 0.7) -> List[Dict]:
         # Fetch leads from CRM
