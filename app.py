@@ -140,6 +140,27 @@ async def health_check():
     return {"status": "healthy"}
 
 
+@app.get("/test-chromadb-v2")
+async def test_chromadb_v2():
+    """Test ChromaDB v2 connection"""
+    try:
+        from lead_similarity import LeadSimilarityAnalyzer
+        
+        analyzer = LeadSimilarityAnalyzer()
+        connection_status = analyzer.test_connection()
+        
+        return {
+            "status": "success",
+            "chromadb_status": connection_status,
+            "message": "ChromaDB v2 connection test completed"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to test ChromaDB v2: {str(e)}"
+        }
+
+
 if __name__ == "__main__":
     # For production deployment on Render
     port = int(os.environ.get("PORT", 8000))

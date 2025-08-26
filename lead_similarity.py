@@ -16,10 +16,12 @@ headers = {
     "Content-Type": "application/json"
 }
 
-client = chromadb.CloudClient(
-  api_key= os.getenv('CHROMADB_API_KEY'),
-  tenant='d2d08375-42ea-4bac-854b-09bac5998a24',
-  database='Daily Digest'
+# Updated ChromaDB client for v2 API
+client = chromadb.HttpClient(
+    host="https://api.trychroma.com",
+    api_key=os.getenv('CHROMADB_API_KEY'),
+    tenant="d2d08375-42ea-4bac-854b-09bac5998a24",
+    database="Daily Digest"
 )
 
 
@@ -48,7 +50,7 @@ class LeadSimilarityAnalyzer:
 
         self.client = OpenAI(api_key=self.api_key)
 
-        # Use ChromaDB Cloud client
+        # Use the updated ChromaDB client for v2 API
         self.chroma_client = client
         
         self.embedding_fn = embedding_functions.OpenAIEmbeddingFunction(
@@ -56,13 +58,40 @@ class LeadSimilarityAnalyzer:
             model_name="text-embedding-ada-002"
         )
 
-        # Get or create collection in ChromaDB Cloud
-        self.collection = self.chroma_client.get_or_create_collection(
-            name="leads_collection",
-            embedding_function=self.embedding_fn
-        )
-        
-        print(f"[INFO] Connected to ChromaDB Cloud collection: {self.collection.name}")
+        # Get or create collection in ChromaDB v2
+        try:
+            self.collection = self.chroma_client.get_or_create_collection(
+                name="leads_collection",
+                embedding_function=self.embedding_fn
+            )
+            print(f"[INFO] Connected to ChromaDB v2 collection: {self.collection.name}")
+        except Exception as e:
+            print(f"[ERROR] Failed to connect to ChromaDB: {e}")
+            # Fallback to in-memory client if cloud connection fails
+            print("[WARNING] Falling back to in-memory ChromaDB")
+            self.chroma_client = chromadb.Client()
+            self.collection = self.chroma_client.get_or_create_collection(
+                name="leads_collection",
+                embedding_function=self.embedding_fn
+            )
+
+    def test_connection(self):
+        """Test the ChromaDB connection and return status"""
+        try:
+            # Try to get collection info
+            collection_info = self.collection.count()
+            return {
+                "status": "connected",
+                "collection_name": self.collection.name,
+                "document_count": collection_info,
+                "api_version": "v2"
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "error": str(e),
+                "api_version": "v2"
+            }
 
     def _sanitize_metadata(self, metadata: Dict) -> Dict:
         """
