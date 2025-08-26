@@ -60,15 +60,37 @@ class LeadSimilarityAnalyzer:
         if not self.api_key:
             raise ValueError("OpenAI API key is missing!")
 
-        self.client = OpenAI(api_key=self.api_key)
+        # Initialize OpenAI client with explicit configuration
+        try:
+            self.client = OpenAI(api_key=self.api_key)
+        except Exception as e:
+            print(f"[WARNING] Failed to initialize OpenAI client: {e}")
+            # Try alternative initialization
+            import openai
+            openai.api_key = self.api_key
+            self.client = openai
 
         # Use the updated ChromaDB client for v2 API
         self.chroma_client = client
         
-        self.embedding_fn = embedding_functions.OpenAIEmbeddingFunction(
-            api_key=self.api_key,
-            model_name="text-embedding-ada-002"
-        )
+        # Initialize embedding function with error handling
+        try:
+            self.embedding_fn = embedding_functions.OpenAIEmbeddingFunction(
+                api_key=self.api_key,
+                model_name="text-embedding-ada-002"
+            )
+        except Exception as e:
+            print(f"[ERROR] Failed to initialize embedding function: {e}")
+            # Try alternative initialization
+            try:
+                self.embedding_fn = embedding_functions.OpenAIEmbeddingFunction(
+                    api_key=self.api_key,
+                    model_name="text-embedding-ada-002",
+                    openai_client=self.client
+                )
+            except Exception as e2:
+                print(f"[ERROR] Alternative embedding initialization also failed: {e2}")
+                raise e2
 
         # Get or create collection in ChromaDB v2
         try:

@@ -162,6 +162,28 @@ async def test_chromadb_v2():
         }
 
 
+@app.get("/test-openai")
+async def test_openai():
+    """Test OpenAI client initialization"""
+    try:
+        from openai import OpenAI
+        
+        # Test basic OpenAI client
+        client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        
+        return {
+            "status": "success",
+            "message": "OpenAI client initialized successfully",
+            "api_key_length": len(os.getenv('OPENAI_API_KEY', ''))
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"OpenAI client initialization failed: {str(e)}",
+            "error_type": type(e).__name__
+        }
+
+
 if __name__ == "__main__":
     # For production deployment on Render
     port = int(os.environ.get("PORT", 8000))
