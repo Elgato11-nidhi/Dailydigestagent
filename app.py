@@ -152,7 +152,8 @@ async def test_chromadb_v2():
         return {
             "status": "success",
             "chromadb_status": connection_status,
-            "message": "ChromaDB v2 connection test completed"
+            "message": "ChromaDB v2 connection test completed",
+            "api_endpoint": "api.trychroma.com:443"
         }
     except Exception as e:
         return {

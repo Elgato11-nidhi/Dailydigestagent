@@ -5,6 +5,7 @@ from typing import List, Dict
 from dotenv import load_dotenv
 from openai import OpenAI
 import chromadb
+from chromadb.config import Settings
 from chromadb.utils import embedding_functions
 from datetime import datetime
 
@@ -17,12 +18,23 @@ headers = {
 }
 
 # Updated ChromaDB client for v2 API
-client = chromadb.HttpClient(
-    host="https://api.trychroma.com",
-    api_key=os.getenv('CHROMADB_API_KEY'),
-    tenant="d2d08375-42ea-4bac-854b-09bac5998a24",
-    database="Daily Digest"
-)
+try:
+    # Try the new v2 API approach
+    client = chromadb.Client(
+        Settings(
+            chroma_server_host="api.trychroma.com",
+            chroma_server_http_port=443,
+            chroma_server_headers={
+                "Authorization": f"Bearer {os.getenv('CHROMADB_API_KEY')}"
+            }
+        )
+    )
+    print("[INFO] Using ChromaDB Cloud v2 API")
+except Exception as e:
+    print(f"[WARNING] Failed to initialize ChromaDB Cloud client: {e}")
+    # Fallback to local client
+    client = chromadb.PersistentClient(path="./chroma_db")
+    print("[INFO] Using local ChromaDB as fallback")
 
 
 def fetch_data(query: str) -> List[Dict]:
@@ -60,19 +72,26 @@ class LeadSimilarityAnalyzer:
 
         # Get or create collection in ChromaDB v2
         try:
-            self.collection = self.chroma_client.get_or_create_collection(
-                name="leads_collection",
-                embedding_function=self.embedding_fn
-            )
-            print(f"[INFO] Connected to ChromaDB v2 collection: {self.collection.name}")
+            # Try to use the cloud client first
+            if hasattr(self.chroma_client, 'get_or_create_collection'):
+                self.collection = self.chroma_client.get_or_create_collection(
+                    name="Daily Digest"
+                )
+                print(f"[INFO] Connected to ChromaDB collection: {self.collection.name}")
+            else:
+                # Fallback to local client
+                self.chroma_client = chromadb.PersistentClient(path="./chroma_db")
+                self.collection = self.chroma_client.get_or_create_collection(
+                    name="Daily Digest"
+                )
+                print(f"[INFO] Using local ChromaDB collection: {self.collection.name}")
         except Exception as e:
             print(f"[ERROR] Failed to connect to ChromaDB: {e}")
-            # Fallback to in-memory client if cloud connection fails
+            # Fallback to in-memory client if everything fails
             print("[WARNING] Falling back to in-memory ChromaDB")
             self.chroma_client = chromadb.Client()
             self.collection = self.chroma_client.get_or_create_collection(
-                name="leads_collection",
-                embedding_function=self.embedding_fn
+                name="Daily Digest"
             )
 
     def test_connection(self):
@@ -80,16 +99,27 @@ class LeadSimilarityAnalyzer:
         try:
             # Try to get collection info
             collection_info = self.collection.count()
+            
+            # Determine client type
+            if hasattr(self.chroma_client, '_identifier'):
+                client_type = "ChromaDB Cloud"
+            elif hasattr(self.chroma_client, '_path'):
+                client_type = "ChromaDB Local"
+            else:
+                client_type = "ChromaDB In-Memory"
+            
             return {
                 "status": "connected",
                 "collection_name": self.collection.name,
                 "document_count": collection_info,
+                "client_type": client_type,
                 "api_version": "v2"
             }
         except Exception as e:
             return {
                 "status": "error",
                 "error": str(e),
+                "client_type": "Unknown",
                 "api_version": "v2"
             }
 
