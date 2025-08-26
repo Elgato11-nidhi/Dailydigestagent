@@ -17,7 +17,6 @@ ENV/
 # Data files (large and sensitive)
 data/
 lead_embeddings_db/
-*.txt
 *.sqlite3
 *.db
 
