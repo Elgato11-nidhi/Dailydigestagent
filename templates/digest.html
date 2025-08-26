@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Daily Digest - User {{ user_id }}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --primary-color: #16a34a;
+            --primary-gradient: linear-gradient(135deg, #16a34a, #22c55e);
+            --secondary-color: #10b981;
+            --background-color: #f8fafc;
+            --card-background: #ffffff;
+            --text-color: #111827;
+            --muted-text: #6b7280;
+            --border-color: #e5e7eb;
+            --shadow: 0 6px 25px rgba(0, 0, 0, 0.08);
+            --radius: 14px;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--background-color);
+            color: var(--text-color);
+            padding: 2rem;
+            background-image: radial-gradient(circle at 10% 10%, rgba(22, 163, 74, 0.05) 0%, transparent 50%),
+                radial-gradient(circle at 90% 90%, rgba(34, 197, 94, 0.05) 0%, transparent 50%);
+            background-size: cover;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: auto;
+        }
+
+        /* Back Button */
+        .back-button {
+            display: inline-block;
+            background: var(--primary-gradient);
+            color: white;
+            padding: 0.7rem 1.4rem;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.95rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 4px 10px rgba(22, 163, 74, 0.25);
+            transition: all 0.25s ease;
+        }
+
+        .back-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 14px rgba(22, 163, 74, 0.3);
+        }
+
+        /* Header */
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .header h1 {
+            font-size: 2.4rem;
+            font-weight: 700;
+            background: var(--primary-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header .subtitle {
+            font-size: 1rem;
+            color: var(--muted-text);
+            margin-top: 0.25rem;
+        }
+
+        /* Grid Layout for Digest */
+        .digest-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        /* Cards */
+        .card {
+            background-color: var(--card-background);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border-color);
+            overflow: hidden;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            margin-bottom: 2rem;
+        }
+
+        .card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 30px rgba(22, 163, 74, 0.12);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            padding: 1rem 1.2rem;
+            background: var(--primary-gradient);
+            color: white;
+        }
+
+        .card-header svg {
+            width: 22px;
+            height: 22px;
+            margin-right: 0.5rem;
+        }
+
+        .card-header h2 {
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+
+        .card-content {
+            padding: 1.2rem;
+        }
+
+        .digest-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .digest-list li {
+            padding: 0.75rem;
+            background-color: #f9fafb;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            margin-bottom: 0.6rem;
+            border: 1px solid var(--border-color);
+        }
+
+        .no-data {
+            text-align: center;
+            font-size: 0.9rem;
+            color: var(--muted-text);
+            padding: 1rem;
+        }
+
+        /* Lead Cards */
+        .lead-card {
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            background-color: #f9fafb;
+            transition: all 0.2s ease;
+        }
+
+        .lead-card:hover {
+            background-color: #f0fdf4;
+            transform: translateY(-2px);
+        }
+
+        .lead-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.4rem;
+        }
+
+        .lead-title {
+            font-size: 1rem;
+            font-weight: 600;
+        }
+
+        .lead-score {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 0.3rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+        }
+
+        .lead-info {
+            font-size: 0.85rem;
+            color: var(--muted-text);
+            margin-bottom: 0.4rem;
+        }
+
+        .lead-description {
+            font-size: 0.85rem;
+            line-height: 1.4;
+        }
+
+        /* Email Cards */
+        .email-card {
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            background-color: #f9fafb;
+            transition: all 0.2s ease;
+        }
+
+        .email-card:hover {
+            background-color: #f0fdf4;
+            transform: translateY(-2px);
+        }
+
+        .email-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 0.8rem;
+        }
+
+        .email-subject {
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--text-color);
+            flex: 1;
+            margin-right: 1rem;
+        }
+
+        .email-date {
+            font-size: 0.8rem;
+            color: var(--muted-text);
+            white-space: nowrap;
+        }
+
+        .email-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 0.3rem;
+            margin-bottom: 0.8rem;
+        }
+
+        .email-from, .email-to {
+            font-size: 0.85rem;
+            color: var(--muted-text);
+        }
+
+        .email-from strong, .email-to strong {
+            color: var(--text-color);
+        }
+
+        .email-body {
+            font-size: 0.85rem;
+            line-height: 1.5;
+            color: var(--text-color);
+            background-color: white;
+            padding: 0.8rem;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .email-author {
+            font-size: 0.8rem;
+            color: var(--muted-text);
+            margin-top: 0.5rem;
+            font-style: italic;
+        }
+
+        .email-type {
+            display: inline-block;
+            background-color: var(--secondary-color);
+            color: white;
+            padding: 0.2rem 0.6rem;
+            border-radius: 12px;
+            font-size: 0.7rem;
+            margin-top: 0.5rem;
+        }
+
+        /* Side by Side Grid */
+        .side-by-side-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+            margin-bottom: 2rem;
+            position: relative;
+        }
+
+        /* Visual separator between the two columns */
+        .side-by-side-grid::after {
+            content: '';
+            position: absolute;
+            left: 50%;
+            top: 0;
+            bottom: 0;
+            width: 1px;
+            background: linear-gradient(to bottom, transparent, var(--border-color), transparent);
+            transform: translateX(-50%);
+        }
+
+        /* Ensure cards in side-by-side layout have consistent heights */
+        .side-by-side-grid .card {
+            display: flex;
+            flex-direction: column;
+            height: fit-content;
+            position: relative;
+            z-index: 1;
+        }
+
+        .side-by-side-grid .card-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Responsive design for mobile */
+        @media (max-width: 768px) {
+            .side-by-side-grid {
+                grid-template-columns: 1fr;
+                gap: 1rem;
+            }
+            
+            .side-by-side-grid::after {
+                display: none;
+            }
+            
+            .side-by-side-grid .card {
+                margin-bottom: 1rem;
+            }
+        }
+
+        /* Performance Indicator */
+        .performance-indicator {
+            margin-top: 1rem;
+            font-size: 0.9rem;
+            color: var(--muted-text);
+        }
+
+        .performance-badge {
+            display: inline-block;
+            padding: 0.4rem 0.8rem;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+
+        .performance-badge.sequential {
+            background-color: #fef3c7;
+            color: #d97706;
+        }
+
+        .performance-badge.parallel {
+            background-color: #d1fae5;
+            color: #065f46;
+        }
+
+        .performance-badge.error {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+
+        /* Section Header */
+        .section-header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .section-header h2 {
+            font-size: 1.8rem;
+            font-weight: 700;
+            background: var(--primary-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .section-header p {
+            font-size: 1rem;
+            color: var(--muted-text);
+            margin-top: 0.5rem;
+        }
+
+        /* Priority Sections */
+        .priority-section {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .priority-group {
+            background-color: #f9fafb;
+            border-radius: 10px;
+            padding: 1rem;
+            border: 1px solid var(--border-color);
+        }
+
+        .priority-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: var(--text-color);
+        }
+
+        .priority-title.high {
+            color: #d97706; /* Orange for high priority */
+        }
+
+        .priority-title.low {
+            color: #065f46; /* Green for low priority */
+        }
+
+        .priority-item {
+            padding: 0.75rem;
+            background-color: #f9fafb;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            margin-bottom: 0.6rem;
+            border-color: #a7f3d0;
+            border: 1px solid var(--border-color);
+        }
+
+        .deal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.3rem;
+        }
+
+        .deal-header .priority-badge {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 0.2rem 0.6rem;
+            border-radius: 12px;
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+
+        .deal-header .priority-badge.high {
+            background-color: #d97706;
+        }
+
+        .deal-header .priority-badge.low {
+            background-color: #065f46;
+        }
+
+        .deal-details {
+            font-size: 0.85rem;
+            color: var(--muted-text);
+        }
+
+        /* New styles for deadlines */
+        .deadline-item {
+            padding: 0.75rem;
+            background-color: #f9fafb;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            margin-bottom: 0.6rem;
+            border: 1px solid var(--border-color);
+        }
+
+        /* Priority-based styling for deadline items */
+        .deadline-item.priority-1,
+        .deadline-item.priority-2,
+        .deadline-item.priority-3,
+        .deadline-item.priority-4,
+        .deadline-item.priority-5 {
+            background-color: #fef3c7;
+            border-color: #fcd34d;
+        }
+
+        .deadline-item.priority-0 {
+            background-color: #d1fae5;
+            border-color: #a7f3d0;
+        }
+
+        /* Handle any other priority values */
+        .deadline-item[class*="priority-"]:not(.priority-0) {
+            background-color: #fef3c7;
+            border-color: #fcd34d;
+        }
+
+        /* Priority badge styling for deadlines */
+        .deadline-header .priority-badge {
+            background-color: #d97706;
+            color: white;
+            padding: 0.2rem 0.6rem;
+            border-radius: 12px;
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+
+        .deadline-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.4rem;
+        }
+
+        .deadline-details {
+            font-size: 0.85rem;
+            color: var(--muted-text);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <a href="/" class="back-button">← Back</a>
+
+        <div class="header">
+            <h1>Daily Digest</h1>
+            <p class="subtitle">For User ID: {{ user_id }}</p>
+            {% if execution_time and execution_time != "unknown" %}
+            <div class="performance-indicator">
+                {% if execution_time == "sequential_fallback" %}
+                <span class="performance-badge sequential">Sequential Fallback</span>
+                {% elif execution_time == "error" %}
+                <span class="performance-badge error">Error</span>
+                {% else %}
+                <span class="performance-badge parallel">Parallel: {{ "%.2f"|format(execution_time) }}s</span>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Byte-Sized Digest -->
+        <div class="digest-grid">
+            <!-- Upcoming Meetings -->
+            <div class="card">
+                <div class="card-header">
+                    📅
+                    <h2>Upcoming Meetings</h2>
+                </div>
+                <div class="card-content">
+                    {% if digest_data.upcoming_meetings %}
+                    <ul class="digest-list">
+                        {% for meeting in digest_data.upcoming_meetings %}
+                        <li><strong>{{ meeting.name }}</strong> with {{ meeting.builder_company }} at {{ meeting.start }}</li>
+                        {% endfor %}
+                    </ul>
+                    {% else %}
+                    <p class="no-data">No meetings today.</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- High Priority Deals -->
+            <div class="card">
+                <div class="card-header">
+                    💼
+                    <h2>High-Priority Deals</h2>
+                </div>
+                <div class="card-content">
+                    {% if digest_data.high_priority_deals %}
+                    <div class="priority-section">
+                        <!-- Priority 1+ Deals -->
+                        {% set priority_deals = [] %}
+                        {% set zero_priority_deals = [] %}
+                        {% for deal in digest_data.high_priority_deals %}
+                            {% if deal.priority|int >= 1 %}
+                                {% set _ = priority_deals.append(deal) %}
+                            {% elif deal.priority|int == 0 %}
+                                {% set _ = zero_priority_deals.append(deal) %}
+                            {% endif %}
+                        {% endfor %}
+                        
+                        {% if priority_deals %}
+                            <ul class="digest-list">
+                                {% for deal in priority_deals %}
+                                <li class="priority-item high">
+                                    <div class="deal-header">
+                                        <strong>{{ deal.name }}</strong>
+                                        <span class="priority-badge high">P{{ deal.priority }}</span>
+                                    </div>
+                                    <div class="deal-details">
+                                        Revenue: {{ deal.revenue }} | Partner: {{ deal.partner_name }}
+                                    </div>
+                                </li>
+                                {% endfor %}
+                            </ul>
+                        {% endif %}
+                        
+                        <!-- Priority 0 Deals -->
+                        {% if zero_priority_deals %}
+                            <ul class="digest-list">
+                                {% for deal in zero_priority_deals %}
+                                <li class="priority-item low">
+                                    <div class="deal-header">
+                                        <strong>{{ deal.name }}</strong>
+                                        <span class="priority-badge low">P0</span>
+                                    </div>
+                                    <div class="deal-details">
+                                        Revenue: {{ deal.revenue }} | Partner: {{ deal.partner_name }}
+                                    </div>
+                                </li>
+                                {% endfor %}
+                            </ul>
+                        {% endif %}
+                    </div>
+                    {% else %}
+                    <p class="no-data">No high-priority deals.</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Deadlines Soon -->
+            <div class="card">
+                <div class="card-header">
+                    ⏳
+                    <h2>Deadlines Soon</h2>
+                </div>
+                <div class="card-content">
+                    {% if digest_data.deadlines_soon %}
+                    <ul class="digest-list">
+                        {% for deadline in digest_data.deadlines_soon %}
+                        <li class="deadline-item priority-{{ deadline.priority|int }}">
+                            <div class="deadline-header">
+                                <strong>{{ deadline.name }}</strong>
+                                {% if deadline.priority|int > 0 %}
+                                <span class="priority-badge high">P{{ deadline.priority }}</span>
+                                {% endif %}
+                            </div>
+                            <div class="deadline-details">
+                                Due: {{ deadline.deadline }} | Partner: {{ deadline.partner_name }}
+                            </div>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                    {% else %}
+                    <p class="no-data">No upcoming deadlines.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Emails and Similar Leads Side by Side -->
+        <div class="side-by-side-grid">
+            <!-- Recent Emails -->
+            <div class="card">
+                <div class="card-header">
+                    📧
+                    <h2>Recent Emails</h2>
+                </div>
+                <div class="card-content">
+                    {% if emails_data %}
+                    {% for email in emails_data %}
+                    <div class="email-card">
+                        <div class="email-header">
+                            <div class="email-subject">{{ email.subject or 'No Subject' }}</div>
+                            <div class="email-date">{{ email.date or email.create_date or 'Unknown Date' }}</div>
+                        </div>
+                        <div class="email-meta">
+                            <div class="email-from">
+                                <strong>From:</strong> {{ email.email_from or 'Unknown Sender' }}
+                            </div>
+                            <div class="email-to">
+                                <strong>To:</strong> {{ email.email_to or 'Unknown Recipient' }}
+                            </div>
+                        </div>
+                        {% if email.body %}
+                        <div class="email-body">
+                            {{ email.body[:300] }}{% if email.body|length > 300 %}...{% endif %}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                    {% else %}
+                    <p class="no-data">No recent emails found.</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Similar Leads -->
+            <div class="card">
+                <div class="card-header">
+                    🔍
+                    <h2>Similar Leads</h2>
+                </div>
+                <div class="card-content">
+                    {% if similar_leads_data %}
+                    {% for item in similar_leads_data %}
+                    <div class="lead-card">
+                        <div class="lead-header">
+                            <div class="lead-title">{{ item['new_lead']['name'] or 'Unnamed Lead' }}</div>
+                        </div>
+                        <div class="lead-info">
+                            <strong>ID:</strong> {{ item['new_lead']['id'] }}
+                        </div>
+                        {% if item['new_lead']['project_description'] %}
+                        <div class="lead-description">
+                            {{ item['new_lead']['project_description'] }}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                    {% else %}
+                    <p class="no-data">No similar leads found.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+    </div>
+</body>
+
+</html>
