@@ -17,9 +17,8 @@ headers = {
     "Content-Type": "application/json"
 }
 
-# Updated ChromaDB client for v2 API
+# Initialize ChromaDB client (Cloud v2 preferred, fallback to local/in-memory)
 try:
-    # Try the new v2 API approach
     client = chromadb.Client(
         Settings(
             chroma_server_host="api.trychroma.com",
@@ -32,7 +31,6 @@ try:
     print("[INFO] Using ChromaDB Cloud v2 API")
 except Exception as e:
     print(f"[WARNING] Failed to initialize ChromaDB Cloud client: {e}")
-    # Fallback to local client
     client = chromadb.PersistentClient(path="./chroma_db")
     print("[INFO] Using local ChromaDB as fallback")
 
@@ -45,6 +43,7 @@ def fetch_data(query: str) -> List[Dict]:
             data = response.json()
             return data.get('result', {}).get('data', [])
         else:
+            print(f"[ERROR] CRM API returned {response.status_code}: {response.text}")
             return []
     except requests.exceptions.RequestException as e:
         print(f"[ERROR] Request error: {e}")
@@ -52,116 +51,78 @@ def fetch_data(query: str) -> List[Dict]:
 
 
 class LeadSimilarityAnalyzer:
-    def __init__(self, api_key: str = None):
+    def __init__(self):
         load_dotenv()
 
         self.api_key = os.getenv('OPENAI_API_KEY')
         if not self.api_key:
             raise ValueError("OpenAI API key is missing!")
 
-        # Initialize OpenAI client with explicit configuration
+        # Initialize OpenAI client
         try:
             self.client = OpenAI()
         except Exception as e:
             print(f"[WARNING] Failed to initialize OpenAI client: {e}")
 
-        # Use the updated ChromaDB client for v2 API
+        # Initialize ChromaDB client
         self.chroma_client = client
-        
-        # Initialize embedding function with correct v2 API
+
+        # Initialize embedding function (OpenAI)
         try:
             self.embedding_fn = embedding_functions.OpenAIEmbeddingFunction(
                 api_key=self.api_key,
-                model_name="text-embedding-3-small"  # Updated to newer model
+                model_name="text-embedding-3-small"
             )
         except Exception as e:
-            print(f"[ERROR] Failed to initialize embedding function: {e}")
-            # Try with older model as fallback
-            try:
-                self.embedding_fn = embedding_functions.OpenAIEmbeddingFunction(
-                    api_key=self.api_key,
-                    model_name="text-embedding-ada-002"
-                )
-            except Exception as e2:
-                print(f"[ERROR] Alternative embedding initialization also failed: {e2}")
-                raise e2
+            print(f"[ERROR] Failed with text-embedding-3-small: {e}")
+            # Fallback to older model
+            self.embedding_fn = embedding_functions.OpenAIEmbeddingFunction(
+                api_key=self.api_key,
+                model_name="text-embedding-ada-002"
+            )
 
-        # Get or create collection in ChromaDB v2
+        # Get or create collection
         try:
-            # Try to use the cloud client first
-            if hasattr(self.chroma_client, 'get_or_create_collection'):
-                self.collection = self.chroma_client.get_or_create_collection(
-                    name="leads_collection",
-                    embedding_function=self.embedding_fn
-                )
-                print(f"[INFO] Connected to ChromaDB collection: {self.collection.name}")
-            else:
-                # Fallback to local client
-                self.chroma_client = chromadb.PersistentClient(path="./chroma_db")
-                self.collection = self.chroma_client.get_or_create_collection(
-                    name="leads_collection",
-                    embedding_function=self.embedding_fn
-                )
-                print(f"[INFO] Using local ChromaDB collection: {self.collection.name}")
+            self.collection = self.chroma_client.get_or_create_collection(
+                name="leads_collection",
+                embedding_function=self.embedding_fn
+            )
+            print(f"[INFO] Connected to ChromaDB collection: {self.collection.name}")
         except Exception as e:
             print(f"[ERROR] Failed to connect to ChromaDB: {e}")
-            # Fallback to in-memory client if everything fails
             print("[WARNING] Falling back to in-memory ChromaDB")
             self.chroma_client = chromadb.Client()
             self.collection = self.chroma_client.get_or_create_collection(
                 name="leads_collection",
                 embedding_function=self.embedding_fn
-            ) 
+            )
 
     def test_connection(self):
-        """Test the ChromaDB connection and return status"""
+        """Test ChromaDB connection and return status"""
         try:
-            # Try to get collection info
             collection_info = self.collection.count()
-            
-            # Determine client type
-            if hasattr(self.chroma_client, '_identifier'):
-                client_type = "ChromaDB Cloud"
-            elif hasattr(self.chroma_client, '_path'):
-                client_type = "ChromaDB Local"
-            else:
-                client_type = "ChromaDB In-Memory"
-            
             return {
                 "status": "connected",
                 "collection_name": self.collection.name,
                 "document_count": collection_info,
-                "client_type": client_type,
-                "api_version": "v2",
-                "collection_id": str(self.collection.id) if hasattr(self.collection, 'id') else "N/A"
             }
         except Exception as e:
-            return {
-                "status": "error",
-                "error": str(e),
-                "client_type": "Unknown",
-                "api_version": "v2"
-            }
+            return {"status": "error", "error": str(e)}
 
     def _sanitize_metadata(self, metadata: Dict) -> Dict:
-        """
-        Replace None values in metadata with safe defaults.
-        """
+        """Ensure safe metadata values for ChromaDB"""
         sanitized = {}
         for k, v in metadata.items():
             if v is None:
-                sanitized[k] = ""  # Could also use 0 or False depending on field type
+                sanitized[k] = ""
             else:
                 sanitized[k] = str(v) if not isinstance(v, (int, float, bool)) else v
         return sanitized
 
     def store_lead_embeddings(self, leads: List[Dict], lead_type: str, user_id: int):
-        """
-        Store embeddings in ChromaDB Cloud if not already stored, with safe metadata.
-        """
         stored_count = 0
         skipped_count = 0
-        
+
         for lead in leads:
             lead_id = str(lead.get("id", "")).strip()
             if not lead_id:
@@ -175,8 +136,8 @@ class LeadSimilarityAnalyzer:
                 if existing_doc.get("ids"):
                     print(f"[DEBUG] Embedding already exists for Lead ID {lead_id}")
                     continue
-            except Exception as e:
-                print(f"[DEBUG] No existing embedding for Lead ID {lead_id}: {e}")
+            except Exception:
+                pass
 
             desc = lead.get("project_description", "")
             if not desc.strip():
@@ -184,7 +145,6 @@ class LeadSimilarityAnalyzer:
                 skipped_count += 1
                 continue
 
-            print(f"[DEBUG] Storing embedding for {lead_type} lead {lead_id} (user {user_id})")
             metadata = self._sanitize_metadata({
                 "lead_type": lead_type,
                 "user_id": user_id,
@@ -205,14 +165,11 @@ class LeadSimilarityAnalyzer:
             except Exception as e:
                 print(f"[ERROR] Failed to store embedding for Lead ID {lead_id}: {e}")
                 skipped_count += 1
-        
+
         print(f"[INFO] Embedding storage complete: {stored_count} stored, {skipped_count} skipped")
         return stored_count
 
     def get_stored_leads(self, limit: int = 10):
-        """
-        Retrieve stored leads from ChromaDB for verification.
-        """
         try:
             results = self.collection.get(limit=limit)
             return {
@@ -222,28 +179,18 @@ class LeadSimilarityAnalyzer:
                 "count": len(results.get("ids", []))
             }
         except Exception as e:
-            print(f"[ERROR] Failed to retrieve leads from ChromaDB: {e}")
+            print(f"[ERROR] Failed to retrieve leads: {e}")
             return {"error": str(e)}
 
     def search_similar_leads(self, query: str, limit: int = 5):
-        """
-        Search for leads similar to a given query using ChromaDB.
-        """
         try:
-            results = self.collection.query(
-                query_texts=[query],
-                n_results=limit
-            )
-            return {
-                "query": query,
-                "results": results
-            }
+            results = self.collection.query(query_texts=[query], n_results=limit)
+            return {"query": query, "results": results}
         except Exception as e:
-            print(f"[ERROR] Failed to search leads in ChromaDB: {e}")
+            print(f"[ERROR] Failed to search leads: {e}")
             return {"error": str(e)}
 
     def find_interest_matched_new_leads(self, user_id: int, similarity_threshold: float = 0.7) -> List[Dict]:
-        # Fetch leads from CRM
         existing_leads = fetch_data(f"""
             SELECT id, name, project_description, region 
             FROM crm_lead 
@@ -259,13 +206,12 @@ class LeadSimilarityAnalyzer:
             SELECT id, name, project_description, create_date, user_id, region 
             FROM crm_lead 
             WHERE project_description IS NOT NULL 
-              AND create_date >= NOW() - INTERVAL '100 hours' 
+              AND create_date >= NOW() - INTERVAL '24 hours' 
               AND region = '{region}'
         """)
 
         print(f"[DEBUG] Found {len(existing_leads)} existing leads, {len(new_leads)} new leads.")
 
-        # Store embeddings
         self.store_lead_embeddings(existing_leads, "existing", user_id)
         self.store_lead_embeddings(new_leads, "new", user_id)
 
@@ -277,18 +223,12 @@ class LeadSimilarityAnalyzer:
             results = self.collection.query(
                 query_texts=[new_lead["project_description"]],
                 n_results=3,
-                where={
-                    "$and": [
-                        {"lead_type": {"$eq": "existing"}},
-                        {"user_id": {"$eq": user_id}}
-                    ]
-                }
+                where={"$and": [{"lead_type": {"$eq": "existing"}}, {"user_id": {"$eq": user_id}}]}
             )
 
-            best_similarity = 0
             best_match = None
-
-            for idx, distance in enumerate(results["distances"][0]):
+            best_similarity = 0
+            for idx, distance in enumerate(results.get("distances", [[]])[0]):
                 similarity = 1 - distance
                 if similarity >= similarity_threshold and similarity > best_similarity:
                     best_similarity = similarity
@@ -299,10 +239,8 @@ class LeadSimilarityAnalyzer:
                     }
 
             if best_match:
-                # Only keep the best match per new lead
                 matches[new_lead["id"]] = best_match
 
-        # Sort all matches and return top 3 distinct new leads
         unique_matches = sorted(matches.values(), key=lambda x: x["similarity_score"], reverse=True)
         return unique_matches[:3]
 

@@ -27,7 +27,7 @@ def fetch_data(query):
         return [{"error": f"An error occurred during the request: {e}"}]
 
 
-def get_upcoming_meetings(calendar_events, hours=48):
+def get_upcoming_meetings(calendar_events, hours=24):
     now = datetime.now()
     upcoming = []
     for event in calendar_events:
