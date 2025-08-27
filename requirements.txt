@@ -8,12 +8,11 @@ python-dotenv==1.0.0
 pydantic==2.10.4
 aiohttp==3.9.1
 
-# LangChain ecosystem (pinned to mutually compatible releases)
-langchain==0.2.16
-langchain-core==0.2.15
+# LangChain ecosystem (compatible versions)
+langchain-core==0.2.38
 langchain-openai==0.1.7
 langchain-chroma==0.1.4
 chromadb==0.5.5
 
 # ML / math
-numpy==1.26.4   # ✅ last stable 1.x, avoids numpy>=2 churn
+numpy==1.26.4
