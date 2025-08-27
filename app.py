@@ -174,7 +174,12 @@ async def test_openai():
         return {
             "status": "success",
             "message": "OpenAI client initialized successfully",
-            "api_key_length": len(os.getenv('OPENAI_API_KEY', ''))
+            "api_key_length": len(os.getenv('OPENAI_API_KEY', '')),
+            "embedding_models": [
+                "text-embedding-3-small",
+                "text-embedding-3-large", 
+                "text-embedding-ada-002"
+            ]
         }
     except Exception as e:
         return {

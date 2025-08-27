@@ -55,8 +55,7 @@ class LeadSimilarityAnalyzer:
     def __init__(self, api_key: str = None):
         load_dotenv()
 
-        env_key = os.getenv('OPENAI_API_KEY')
-        self.api_key = api_key or env_key
+        self.api_key = os.getenv('OPENAI_API_KEY')
         if not self.api_key:
             raise ValueError("OpenAI API key is missing!")
 
@@ -67,26 +66,25 @@ class LeadSimilarityAnalyzer:
             print(f"[WARNING] Failed to initialize OpenAI client: {e}")
             # Try alternative initialization
             import openai
-            openai.api_key = self.api_key
+            openai.api_key = os.getenv('OPENAI_API_KEY')
             self.client = openai
 
         # Use the updated ChromaDB client for v2 API
         self.chroma_client = client
         
-        # Initialize embedding function with error handling
+        # Initialize embedding function with correct v2 API
         try:
             self.embedding_fn = embedding_functions.OpenAIEmbeddingFunction(
                 api_key=self.api_key,
-                model_name="text-embedding-ada-002"
+                model_name="text-embedding-3-small"  # Updated to newer model
             )
         except Exception as e:
             print(f"[ERROR] Failed to initialize embedding function: {e}")
-            # Try alternative initialization
+            # Try with older model as fallback
             try:
                 self.embedding_fn = embedding_functions.OpenAIEmbeddingFunction(
                     api_key=self.api_key,
-                    model_name="text-embedding-ada-002",
-                    openai_client=self.client
+                    model_name="text-embedding-ada-002"
                 )
             except Exception as e2:
                 print(f"[ERROR] Alternative embedding initialization also failed: {e2}")
@@ -97,14 +95,16 @@ class LeadSimilarityAnalyzer:
             # Try to use the cloud client first
             if hasattr(self.chroma_client, 'get_or_create_collection'):
                 self.collection = self.chroma_client.get_or_create_collection(
-                    name="Daily Digest"
+                    name="leads_collection",
+                    embedding_function=self.embedding_fn
                 )
                 print(f"[INFO] Connected to ChromaDB collection: {self.collection.name}")
             else:
                 # Fallback to local client
                 self.chroma_client = chromadb.PersistentClient(path="./chroma_db")
                 self.collection = self.chroma_client.get_or_create_collection(
-                    name="Daily Digest"
+                    name="leads_collection",
+                    embedding_function=self.embedding_fn
                 )
                 print(f"[INFO] Using local ChromaDB collection: {self.collection.name}")
         except Exception as e:
@@ -113,8 +113,9 @@ class LeadSimilarityAnalyzer:
             print("[WARNING] Falling back to in-memory ChromaDB")
             self.chroma_client = chromadb.Client()
             self.collection = self.chroma_client.get_or_create_collection(
-                name="Daily Digest"
-            )
+                name="leads_collection",
+                embedding_function=self.embedding_fn
+            ) 
 
     def test_connection(self):
         """Test the ChromaDB connection and return status"""
@@ -135,7 +136,8 @@ class LeadSimilarityAnalyzer:
                 "collection_name": self.collection.name,
                 "document_count": collection_info,
                 "client_type": client_type,
-                "api_version": "v2"
+                "api_version": "v2",
+                "collection_id": str(self.collection.id) if hasattr(self.collection, 'id') else "N/A"
             }
         except Exception as e:
             return {
