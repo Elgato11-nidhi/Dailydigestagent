@@ -142,7 +142,7 @@ async def health_check():
 
 @app.get("/test-chromadb-v2")
 async def test_chromadb_v2():
-    """Test ChromaDB v2 connection"""
+    """Test ChromaDB v2 connection with ChromaDB Cloud + Local fallback"""
     try:
         from lead_similarity import LeadSimilarityAnalyzer
         
@@ -153,7 +153,9 @@ async def test_chromadb_v2():
             "status": "success",
             "chromadb_status": connection_status,
             "message": "ChromaDB v2 connection test completed",
-            "api_endpoint": "api.trychroma.com:443"
+            "integration": "ChromaDB Cloud + Local fallback",
+            "embedding_model": "OpenAI text-embedding-3-small",
+            "storage": "Cloud (preferred) / Local (fallback)"
         }
     except Exception as e:
         return {
