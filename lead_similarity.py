@@ -61,13 +61,9 @@ class LeadSimilarityAnalyzer:
 
         # Initialize OpenAI client with explicit configuration
         try:
-            self.client = OpenAI(api_key=self.api_key)
+            self.client = OpenAI()
         except Exception as e:
             print(f"[WARNING] Failed to initialize OpenAI client: {e}")
-            # Try alternative initialization
-            import openai
-            openai.api_key = os.getenv('OPENAI_API_KEY')
-            self.client = openai
 
         # Use the updated ChromaDB client for v2 API
         self.chroma_client = client
