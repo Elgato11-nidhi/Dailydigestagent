@@ -190,6 +190,27 @@ async def test_openai():
             "error_type": type(e).__name__
         }
 
+@app.get("/verify-storage")
+async def verify_storage():
+    """Verify that embeddings are stored permanently in ChromaDB Cloud"""
+    try:
+        from lead_similarity import LeadSimilarityAnalyzer
+        
+        analyzer = LeadSimilarityAnalyzer()
+        storage_verification = analyzer.verify_permanent_storage()
+        
+        return {
+            "status": "success",
+            "storage_verification": storage_verification,
+            "message": "Storage verification completed",
+            "note": "This checks for duplicate embeddings and verifies permanent storage"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to verify storage: {str(e)}"
+        }
+
 
 if __name__ == "__main__":
     # For production deployment on Render

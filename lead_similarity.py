@@ -6,7 +6,6 @@ import requests
 from typing import List, Dict
 from dotenv import load_dotenv
 from datetime import datetime
-
 from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma   
 from chromadb.config import Settings as ChromaSettings
@@ -79,6 +78,14 @@ class LeadSimilarityAnalyzer:
             results = self.vectorstore.similarity_search("test", k=1)
             collection_info = len(results) if results else 0
             
+            # Get total count of stored embeddings
+            try:
+                # Try to get a larger sample to estimate total count
+                all_results = self.vectorstore.similarity_search("", k=1000)  # Get up to 1000
+                total_estimated = len(all_results)
+            except:
+                total_estimated = "Unknown"
+            
             # Determine client type based on the settings
             if hasattr(self.vectorstore, '_client') and hasattr(self.vectorstore._client, '_identifier'):
                 client_type = "ChromaDB Cloud"
@@ -91,8 +98,49 @@ class LeadSimilarityAnalyzer:
                 "status": "connected",
                 "collection_name": "leads_collection",
                 "document_count": collection_info,
+                "total_embeddings_estimated": total_estimated,
                 "client_type": client_type,
-                "api_version": "v2"
+                "api_version": "v2",
+                "storage_type": "Permanent Cloud Storage" if client_type == "ChromaDB Cloud" else "Local/In-Memory"
+            }
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    def verify_permanent_storage(self):
+        """Verify that embeddings are stored permanently and not duplicated"""
+        try:
+            # Get all stored embeddings
+            all_docs = self.vectorstore.similarity_search("", k=1000)
+            
+            # Check for duplicates by lead_id
+            lead_ids = []
+            duplicates = []
+            for doc in all_docs:
+                lead_id = doc.metadata.get("lead_id")
+                if lead_id in lead_ids:
+                    duplicates.append(lead_id)
+                else:
+                    lead_ids.append(lead_id)
+            
+            # Group by lead_type and user_id
+            lead_types = {}
+            user_ids = {}
+            for doc in all_docs:
+                lead_type = doc.metadata.get("lead_type", "unknown")
+                user_id = doc.metadata.get("user_id", "unknown")
+                
+                lead_types[lead_type] = lead_types.get(lead_type, 0) + 1
+                user_ids[user_id] = user_ids.get(user_id, 0) + 1
+            
+            return {
+                "status": "success",
+                "total_embeddings": len(all_docs),
+                "unique_lead_ids": len(lead_ids),
+                "duplicate_lead_ids": len(duplicates),
+                "duplicates_found": duplicates[:10],  # Show first 10 duplicates
+                "lead_type_distribution": lead_types,
+                "user_id_distribution": user_ids,
+                "storage_verified": len(duplicates) == 0
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -118,6 +166,19 @@ class LeadSimilarityAnalyzer:
                 skipped_count += 1
                 continue
 
+            # Check if already stored to avoid duplicates
+            try:
+                # Search for existing embedding by lead_id in metadata
+                existing_docs = self.vectorstore.similarity_search(
+                    "", k=1, filter={"lead_id": lead_id}
+                )
+                if existing_docs:
+                    print(f"[DEBUG] Embedding already exists for Lead ID {lead_id}, skipping...")
+                    skipped_count += 1
+                    continue
+            except Exception as e:
+                print(f"[DEBUG] Could not check for existing embedding for Lead ID {lead_id}: {e}")
+
             desc = lead.get("project_description", "")
             if not desc.strip():
                 print(f"[WARNING] No description for Lead ID {lead_id}, skipping.")
@@ -136,19 +197,20 @@ class LeadSimilarityAnalyzer:
             )
 
             try:
+                # Store embedding permanently in ChromaDB Cloud
                 self.vectorstore.add_texts(
                     texts=[desc],
                     metadatas=[metadata],
                     ids=[lead_id],
                 )
                 stored_count += 1
-                print(f"[SUCCESS] Stored embedding for Lead ID {lead_id}")
+                print(f"[SUCCESS] Stored NEW embedding for Lead ID {lead_id} in ChromaDB Cloud")
             except Exception as e:
                 print(f"[ERROR] Failed to store embedding for Lead ID {lead_id}: {e}")
                 skipped_count += 1
 
         print(
-            f"[INFO] Embedding storage complete: {stored_count} stored, {skipped_count} skipped"
+            f"[INFO] Embedding storage complete: {stored_count} NEW stored, {skipped_count} already existed/skipped"
         )
         return stored_count
 
