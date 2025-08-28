@@ -162,7 +162,7 @@ class LeadSimilarityAnalyzer:
             try:
                 # Search for existing embedding by lead_id in metadata
                 existing_results = self.collection.get(
-                    where={"lead_id": lead_id}
+                    where={"lead_id": {"$eq": lead_id}}
                 )
                 if existing_results['ids']:
                     print(f"[DEBUG] Embedding already exists for Lead ID {lead_id}, skipping...")
@@ -199,6 +199,9 @@ class LeadSimilarityAnalyzer:
                 print(f"[SUCCESS] Stored NEW embedding for Lead ID {lead_id} in ChromaDB Cloud")
             except Exception as e:
                 print(f"[ERROR] Failed to store embedding for Lead ID {lead_id}: {e}")
+                # Log more details for debugging
+                print(f"[DEBUG] Failed metadata: {metadata}")
+                print(f"[DEBUG] Failed document length: {len(desc) if desc else 'None'}")
                 skipped_count += 1
 
         print(
@@ -286,6 +289,13 @@ class LeadSimilarityAnalyzer:
         print(
             f"[DEBUG] Found {len(existing_leads)} existing leads, {len(new_leads)} new leads."
         )
+        
+        # Log ChromaDB collection info for debugging
+        try:
+            collection_count = self.collection.count()
+            print(f"[DEBUG] ChromaDB collection has {collection_count} total documents")
+        except Exception as e:
+            print(f"[WARNING] Could not get collection count: {e}")
 
         self.store_lead_embeddings(existing_leads, "existing", user_id)
         self.store_lead_embeddings(new_leads, "new", user_id)
@@ -295,24 +305,53 @@ class LeadSimilarityAnalyzer:
             if not new_lead.get("project_description"):
                 continue
 
-            results = self.collection.query(
-                query_texts=[new_lead["project_description"]],
-                n_results=3,
-                where={"lead_type": "existing", "user_id": user_id}
-            )
+            try:
+                results = self.collection.query(
+                    query_texts=[new_lead["project_description"]],
+                    n_results=3,
+                    where={"$and": [
+                        {"lead_type": {"$eq": "existing"}},
+                        {"user_id": {"$eq": user_id}}
+                    ]}
+                )
+            except Exception as e:
+                print(f"[ERROR] ChromaDB query failed for new lead {new_lead['id']}: {e}")
+                # Fallback: try without where clause to get any results
+                try:
+                    results = self.collection.query(
+                        query_texts=[new_lead["project_description"]],
+                        n_results=3
+                    )
+                    print(f"[WARNING] Using fallback query without filters for lead {new_lead['id']}")
+                except Exception as fallback_e:
+                    print(f"[ERROR] Fallback query also failed for lead {new_lead['id']}: {fallback_e}")
+                    continue
 
             best_match = None
             best_similarity = 0
+            
+            # Validate results structure
+            if not results or 'distances' not in results or not results['distances'] or not results['distances'][0]:
+                print(f"[WARNING] Invalid results structure for lead {new_lead['id']}")
+                continue
+                
             for i, score in enumerate(results['distances'][0]):
                 # Score is distance; lower = more similar
                 similarity = 1 - score
                 if similarity >= similarity_threshold and similarity > best_similarity:
-                    best_similarity = similarity
-                    best_match = {
-                        "new_lead": new_lead,
-                        "matched_existing_lead_id": results['metadatas'][0][i].get("lead_id"),
-                        "similarity_score": round(similarity, 3),
-                    }
+                    # Validate metadata exists
+                    if (results.get('metadatas') and 
+                        results['metadatas'][0] and 
+                        i < len(results['metadatas'][0])):
+                        
+                        best_similarity = similarity
+                        best_match = {
+                            "new_lead": new_lead,
+                            "matched_existing_lead_id": results['metadatas'][0][i].get("lead_id"),
+                            "similarity_score": round(similarity, 3),
+                        }
+                    else:
+                        print(f"[WARNING] Missing metadata for result {i} in lead {new_lead['id']}")
 
             if best_match:
                 matches[new_lead["id"]] = best_match
