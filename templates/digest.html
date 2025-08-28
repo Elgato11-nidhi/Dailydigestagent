@@ -30,7 +30,24 @@
                 radial-gradient(circle at 90% 90%, rgba(34, 197, 94, 0.05) 0%, transparent 50%);
             background-size: cover;
         }
-
+        .generate-email-btn {
+            background: var(--primary-gradient);
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.85rem;
+            border: none;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(22, 163, 74, 0.2);
+            transition: all 0.2s ease;
+            margin-top: 0.75rem;
+        }
+        .generate-email-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(22, 163, 74, 0.3);
+        }
         .container {
             max-width: 1200px;
             margin: auto;
@@ -684,6 +701,15 @@
                             {{ item['new_lead']['project_description'] }}
                         </div>
                         {% endif %}
+                        <button class="generate-email-btn"
+                                data-lead-id="{{ item.new_lead.id }}"
+                                data-user-id="{{ user_id }}"
+                                onclick="openEmailGenerator(this.dataset.leadId, this.dataset.userId)">
+                            Generate Email
+                        </button>
+
+
+
                     </div>
                     {% endfor %}
                     {% else %}
@@ -694,6 +720,12 @@
         </div>
 
     </div>
+    <script>
+        function openEmailGenerator(leadId, userId) {
+            const yourAppUrl = `https://visionary-empanada-0ba1aa.netlify.app/?leadId=${leadId}&userId=${userId}`;     
+            window.open(yourAppUrl, 'generateEmailPopup', 'width=1200,height=900');
+        }
+    </script>
 </body>
 
 </html>
