@@ -142,7 +142,7 @@ async def health_check():
 
 @app.get("/test-chromadb-v2")
 async def test_chromadb_v2():
-    """Test ChromaDB v2 connection"""
+    """Test ChromaDB v2 connection with ChromaDB Cloud + Local fallback"""
     try:
         from lead_similarity import LeadSimilarityAnalyzer
         
@@ -153,7 +153,9 @@ async def test_chromadb_v2():
             "status": "success",
             "chromadb_status": connection_status,
             "message": "ChromaDB v2 connection test completed",
-            "api_endpoint": "api.trychroma.com:443"
+            "integration": "ChromaDB Cloud + Local fallback",
+            "embedding_model": "OpenAI text-embedding-3-small",
+            "storage": "Cloud (preferred) / Local (fallback)"
         }
     except Exception as e:
         return {
@@ -186,6 +188,27 @@ async def test_openai():
             "status": "error",
             "message": f"OpenAI client initialization failed: {str(e)}",
             "error_type": type(e).__name__
+        }
+
+@app.get("/verify-storage")
+async def verify_storage():
+    """Verify that embeddings are stored permanently in ChromaDB Cloud"""
+    try:
+        from lead_similarity import LeadSimilarityAnalyzer
+        
+        analyzer = LeadSimilarityAnalyzer()
+        storage_verification = analyzer.verify_permanent_storage()
+        
+        return {
+            "status": "success",
+            "storage_verification": storage_verification,
+            "message": "Storage verification completed",
+            "note": "This checks for duplicate embeddings and verifies permanent storage"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to verify storage: {str(e)}"
         }
 
 

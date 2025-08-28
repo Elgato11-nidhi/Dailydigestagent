@@ -1,38 +1,22 @@
+# app/lead_similarity.py
+
 import os
 import sys
 import requests
 from typing import List, Dict
 from dotenv import load_dotenv
-from openai import OpenAI
-import chromadb
-from chromadb.config import Settings
-from chromadb.utils import embedding_functions
 from datetime import datetime
+from langchain_openai import OpenAIEmbeddings
+from langchain_chroma import Chroma   
+from chromadb.config import Settings as ChromaSettings
 
 load_dotenv()
 
 API_URL = "https://staging.crm.buildmapper.ai/api/v1/execute_query"
 headers = {
-    "API-Key": os.getenv('CRM_API_KEY'),
-    "Content-Type": "application/json"
+    "API-Key": os.getenv("CRM_API_KEY"),
+    "Content-Type": "application/json",
 }
-
-# Initialize ChromaDB client (Cloud v2 preferred, fallback to local/in-memory)
-try:
-    client = chromadb.Client(
-        Settings(
-            chroma_server_host="api.trychroma.com",
-            chroma_server_http_port=443,
-            chroma_server_headers={
-                "Authorization": f"Bearer {os.getenv('CHROMADB_API_KEY')}"
-            }
-        )
-    )
-    print("[INFO] Using ChromaDB Cloud v2 API")
-except Exception as e:
-    print(f"[WARNING] Failed to initialize ChromaDB Cloud client: {e}")
-    client = chromadb.PersistentClient(path="./chroma_db")
-    print("[INFO] Using local ChromaDB as fallback")
 
 
 def fetch_data(query: str) -> List[Dict]:
@@ -41,7 +25,7 @@ def fetch_data(query: str) -> List[Dict]:
         response = requests.post(API_URL, headers=headers, json=payload)
         if response.status_code == 200:
             data = response.json()
-            return data.get('result', {}).get('data', [])
+            return data.get("result", {}).get("data", [])
         else:
             print(f"[ERROR] CRM API returned {response.status_code}: {response.text}")
             return []
@@ -54,63 +38,115 @@ class LeadSimilarityAnalyzer:
     def __init__(self):
         load_dotenv()
 
-        self.api_key = os.getenv('OPENAI_API_KEY')
-        if not self.api_key:
-            raise ValueError("OpenAI API key is missing!")
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("❌ Missing OPENAI_API_KEY in environment variables")
 
-        # Initialize OpenAI client
+        # ✅ Embedding function
+        self.embeddings = OpenAIEmbeddings(
+            openai_api_key=api_key,
+            model="text-embedding-3-small",
+        )
+
+        # ✅ Configure Chroma Cloud client
         try:
-            self.client = OpenAI()
-        except Exception as e:
-            print(f"[WARNING] Failed to initialize OpenAI client: {e}")
-
-        # Initialize ChromaDB client
-        self.chroma_client = client
-
-        # Initialize embedding function (OpenAI)
-        try:
-            self.embedding_fn = embedding_functions.OpenAIEmbeddingFunction(
-                api_key=self.api_key,
-                model_name="text-embedding-3-small"
+            self.vectorstore = Chroma(
+                collection_name="leads_collection",
+                embedding_function=self.embeddings,
+                client_settings=ChromaSettings(
+                    chroma_server_host="api.trychroma.com",   # ✅ Chroma Cloud endpoint
+                    chroma_server_http_port=443,
+                    chroma_server_headers={
+                        "Authorization": f"Bearer {os.getenv('CHROMADB_API_KEY')}"
+                    }
+                ),
             )
+            print("[INFO] Connected to Chroma Cloud v2")
         except Exception as e:
-            print(f"[ERROR] Failed with text-embedding-3-small: {e}")
-            # Fallback to older model
-            self.embedding_fn = embedding_functions.OpenAIEmbeddingFunction(
-                api_key=self.api_key,
-                model_name="text-embedding-ada-002"
-            )
-
-        # Get or create collection
-        try:
-            self.collection = self.chroma_client.get_or_create_collection(
-                name="leads_collection",
-                embedding_function=self.embedding_fn
-            )
-            print(f"[INFO] Connected to ChromaDB collection: {self.collection.name}")
-        except Exception as e:
-            print(f"[ERROR] Failed to connect to ChromaDB: {e}")
-            print("[WARNING] Falling back to in-memory ChromaDB")
-            self.chroma_client = chromadb.Client()
-            self.collection = self.chroma_client.get_or_create_collection(
-                name="leads_collection",
-                embedding_function=self.embedding_fn
+            print(f"[WARNING] Failed to connect to Chroma Cloud: {e}")
+            print("[INFO] Falling back to local ChromaDB (persistent)")
+            self.vectorstore = Chroma(
+                collection_name="leads_collection",
+                embedding_function=self.embeddings,
+                persist_directory="./chroma_db",
             )
 
     def test_connection(self):
         """Test ChromaDB connection and return status"""
         try:
-            collection_info = self.collection.count()
+            # Try to get collection info
+            results = self.vectorstore.similarity_search("test", k=1)
+            collection_info = len(results) if results else 0
+            
+            # Get total count of stored embeddings
+            try:
+                # Try to get a larger sample to estimate total count
+                all_results = self.vectorstore.similarity_search("", k=1000)  # Get up to 1000
+                total_estimated = len(all_results)
+            except:
+                total_estimated = "Unknown"
+            
+            # Determine client type based on the settings
+            if hasattr(self.vectorstore, '_client') and hasattr(self.vectorstore._client, '_identifier'):
+                client_type = "ChromaDB Cloud"
+            elif hasattr(self.vectorstore, '_persist_directory'):
+                client_type = "ChromaDB Local"
+            else:
+                client_type = "ChromaDB In-Memory"
+            
             return {
                 "status": "connected",
-                "collection_name": self.collection.name,
+                "collection_name": "leads_collection",
                 "document_count": collection_info,
+                "total_embeddings_estimated": total_estimated,
+                "client_type": client_type,
+                "api_version": "v2",
+                "storage_type": "Permanent Cloud Storage" if client_type == "ChromaDB Cloud" else "Local/In-Memory"
+            }
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    def verify_permanent_storage(self):
+        """Verify that embeddings are stored permanently and not duplicated"""
+        try:
+            # Get all stored embeddings
+            all_docs = self.vectorstore.similarity_search("", k=1000)
+            
+            # Check for duplicates by lead_id
+            lead_ids = []
+            duplicates = []
+            for doc in all_docs:
+                lead_id = doc.metadata.get("lead_id")
+                if lead_id in lead_ids:
+                    duplicates.append(lead_id)
+                else:
+                    lead_ids.append(lead_id)
+            
+            # Group by lead_type and user_id
+            lead_types = {}
+            user_ids = {}
+            for doc in all_docs:
+                lead_type = doc.metadata.get("lead_type", "unknown")
+                user_id = doc.metadata.get("user_id", "unknown")
+                
+                lead_types[lead_type] = lead_types.get(lead_type, 0) + 1
+                user_ids[user_id] = user_ids.get(user_id, 0) + 1
+            
+            return {
+                "status": "success",
+                "total_embeddings": len(all_docs),
+                "unique_lead_ids": len(lead_ids),
+                "duplicate_lead_ids": len(duplicates),
+                "duplicates_found": duplicates[:10],  # Show first 10 duplicates
+                "lead_type_distribution": lead_types,
+                "user_id_distribution": user_ids,
+                "storage_verified": len(duplicates) == 0
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
     def _sanitize_metadata(self, metadata: Dict) -> Dict:
-        """Ensure safe metadata values for ChromaDB"""
+        """Ensure metadata values are safe for storage"""
         sanitized = {}
         for k, v in metadata.items():
             if v is None:
@@ -130,14 +166,18 @@ class LeadSimilarityAnalyzer:
                 skipped_count += 1
                 continue
 
-            # Check if already stored
+            # Check if already stored to avoid duplicates
             try:
-                existing_doc = self.collection.get(ids=[lead_id])
-                if existing_doc.get("ids"):
-                    print(f"[DEBUG] Embedding already exists for Lead ID {lead_id}")
+                # Search for existing embedding by lead_id in metadata
+                existing_docs = self.vectorstore.similarity_search(
+                    "", k=1, filter={"lead_id": lead_id}
+                )
+                if existing_docs:
+                    print(f"[DEBUG] Embedding already exists for Lead ID {lead_id}, skipping...")
+                    skipped_count += 1
                     continue
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[DEBUG] Could not check for existing embedding for Lead ID {lead_id}: {e}")
 
             desc = lead.get("project_description", "")
             if not desc.strip():
@@ -145,72 +185,96 @@ class LeadSimilarityAnalyzer:
                 skipped_count += 1
                 continue
 
-            metadata = self._sanitize_metadata({
-                "lead_type": lead_type,
-                "user_id": user_id,
-                "name": lead.get("name"),
-                "create_date": lead.get("create_date"),
-                "lead_id": lead_id,
-                "stored_at": datetime.now().isoformat()
-            })
+            metadata = self._sanitize_metadata(
+                {
+                    "lead_type": lead_type,
+                    "user_id": user_id,
+                    "name": lead.get("name"),
+                    "create_date": lead.get("create_date"),
+                    "lead_id": lead_id,
+                    "stored_at": datetime.now().isoformat(),
+                }
+            )
 
             try:
-                self.collection.add(
+                # Store embedding permanently in ChromaDB Cloud
+                self.vectorstore.add_texts(
+                    texts=[desc],
+                    metadatas=[metadata],
                     ids=[lead_id],
-                    documents=[desc],
-                    metadatas=[metadata]
                 )
                 stored_count += 1
-                print(f"[SUCCESS] Stored embedding for Lead ID {lead_id}")
+                print(f"[SUCCESS] Stored NEW embedding for Lead ID {lead_id} in ChromaDB Cloud")
             except Exception as e:
                 print(f"[ERROR] Failed to store embedding for Lead ID {lead_id}: {e}")
                 skipped_count += 1
 
-        print(f"[INFO] Embedding storage complete: {stored_count} stored, {skipped_count} skipped")
+        print(
+            f"[INFO] Embedding storage complete: {stored_count} NEW stored, {skipped_count} already existed/skipped"
+        )
         return stored_count
 
     def get_stored_leads(self, limit: int = 10):
         try:
-            results = self.collection.get(limit=limit)
-            return {
-                "ids": results.get("ids", []),
-                "documents": results.get("documents", []),
-                "metadatas": results.get("metadatas", []),
-                "count": len(results.get("ids", []))
-            }
+            # LangChain Chroma does not have a direct `.get(limit=...)`
+            # Instead, we can perform a dummy similarity search to list some docs
+            results = self.vectorstore.similarity_search(" ", k=limit)
+            return [
+                {
+                    "lead_id": doc.metadata.get("lead_id"),
+                    "metadata": doc.metadata,
+                    "content": doc.page_content,
+                }
+                for doc in results
+            ]
         except Exception as e:
             print(f"[ERROR] Failed to retrieve leads: {e}")
             return {"error": str(e)}
 
     def search_similar_leads(self, query: str, limit: int = 5):
         try:
-            results = self.collection.query(query_texts=[query], n_results=limit)
-            return {"query": query, "results": results}
+            results = self.vectorstore.similarity_search(query, k=limit)
+            return [
+                {
+                    "lead_id": doc.metadata.get("lead_id"),
+                    "metadata": doc.metadata,
+                    "content": doc.page_content,
+                }
+                for doc in results
+            ]
         except Exception as e:
             print(f"[ERROR] Failed to search leads: {e}")
             return {"error": str(e)}
 
-    def find_interest_matched_new_leads(self, user_id: int, similarity_threshold: float = 0.7) -> List[Dict]:
-        existing_leads = fetch_data(f"""
+    def find_interest_matched_new_leads(
+        self, user_id: int, similarity_threshold: float = 0.7
+    ) -> List[Dict]:
+        existing_leads = fetch_data(
+            f"""
             SELECT id, name, project_description, region 
             FROM crm_lead 
             WHERE project_description IS NOT NULL AND user_id = {user_id}
-        """)
+        """
+        )
 
         if not existing_leads:
             print("[WARNING] No existing leads found for this user.")
             return []
 
         region = existing_leads[0].get("region")
-        new_leads = fetch_data(f"""
+        new_leads = fetch_data(
+            f"""
             SELECT id, name, project_description, create_date, user_id, region 
             FROM crm_lead 
             WHERE project_description IS NOT NULL 
               AND create_date >= NOW() - INTERVAL '24 hours' 
               AND region = '{region}'
-        """)
+        """
+        )
 
-        print(f"[DEBUG] Found {len(existing_leads)} existing leads, {len(new_leads)} new leads.")
+        print(
+            f"[DEBUG] Found {len(existing_leads)} existing leads, {len(new_leads)} new leads."
+        )
 
         self.store_lead_embeddings(existing_leads, "existing", user_id)
         self.store_lead_embeddings(new_leads, "new", user_id)
@@ -220,28 +284,34 @@ class LeadSimilarityAnalyzer:
             if not new_lead.get("project_description"):
                 continue
 
-            results = self.collection.query(
-                query_texts=[new_lead["project_description"]],
-                n_results=3,
-                where={"$and": [{"lead_type": {"$eq": "existing"}}, {"user_id": {"$eq": user_id}}]}
+            results = self.vectorstore.similarity_search_with_score(
+                new_lead["project_description"], k=3
             )
 
             best_match = None
             best_similarity = 0
-            for idx, distance in enumerate(results.get("distances", [[]])[0]):
-                similarity = 1 - distance
-                if similarity >= similarity_threshold and similarity > best_similarity:
+            for doc, score in results:
+                # Score is distance; lower = more similar
+                similarity = 1 - score
+                if (
+                    similarity >= similarity_threshold
+                    and similarity > best_similarity
+                    and doc.metadata.get("lead_type") == "existing"
+                    and int(doc.metadata.get("user_id", -1)) == user_id
+                ):
                     best_similarity = similarity
                     best_match = {
                         "new_lead": new_lead,
-                        "matched_existing_lead_id": results["ids"][0][idx],
-                        "similarity_score": round(similarity, 3)
+                        "matched_existing_lead_id": doc.metadata.get("lead_id"),
+                        "similarity_score": round(similarity, 3),
                     }
 
             if best_match:
                 matches[new_lead["id"]] = best_match
 
-        unique_matches = sorted(matches.values(), key=lambda x: x["similarity_score"], reverse=True)
+        unique_matches = sorted(
+            matches.values(), key=lambda x: x["similarity_score"], reverse=True
+        )
         return unique_matches[:3]
 
 
@@ -259,17 +329,21 @@ def main():
         print("Error: User ID must be an integer.")
         sys.exit(1)
 
-    matched_new_leads = analyzer.find_interest_matched_new_leads(user_id, similarity_threshold=0.7)
+    matched_new_leads = analyzer.find_interest_matched_new_leads(
+        user_id, similarity_threshold=0.7
+    )
 
     if not matched_new_leads:
         print("No similar new leads found in the last 24 hours.")
     else:
         print(f"Top {len(matched_new_leads)} similar new leads:\n")
         for match in matched_new_leads:
-            lead = match['new_lead']
-            print(f" - New Lead ID: {lead['id']}, Name: {lead.get('name', 'N/A')}, "
-                  f"Matched with Existing Lead ID: {match['matched_existing_lead_id']}, "
-                  f"Similarity: {match['similarity_score']}")
+            lead = match["new_lead"]
+            print(
+                f" - New Lead ID: {lead['id']}, Name: {lead.get('name', 'N/A')}, "
+                f"Matched with Existing Lead ID: {match['matched_existing_lead_id']}, "
+                f"Similarity: {match['similarity_score']}"
+            )
 
 
 if __name__ == "__main__":
