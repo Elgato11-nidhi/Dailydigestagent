@@ -8,11 +8,9 @@ python-dotenv
 pydantic
 aiohttp
 
-# LangChain ecosystem (compatible versions)
-langchain-core
-langchain-openai
-langchain-chroma
+# ChromaDB and OpenAI
 chromadb
+openai
 
 # ML / math
 numpy

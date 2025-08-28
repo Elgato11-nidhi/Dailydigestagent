@@ -140,9 +140,9 @@ async def health_check():
     return {"status": "healthy"}
 
 
-@app.get("/test-chromadb-v2")
-async def test_chromadb_v2():
-    """Test ChromaDB v2 connection with ChromaDB Cloud + Local fallback"""
+@app.get("/test-chromadb")
+async def test_chromadb():
+    """Test ChromaDB connection with ChromaDB Cloud + Local fallback"""
     try:
         from lead_similarity import LeadSimilarityAnalyzer
         
@@ -152,7 +152,7 @@ async def test_chromadb_v2():
         return {
             "status": "success",
             "chromadb_status": connection_status,
-            "message": "ChromaDB v2 connection test completed",
+            "message": "ChromaDB connection test completed",
             "integration": "ChromaDB Cloud + Local fallback",
             "embedding_model": "OpenAI text-embedding-3-small",
             "storage": "Cloud (preferred) / Local (fallback)"
@@ -160,7 +160,7 @@ async def test_chromadb_v2():
     except Exception as e:
         return {
             "status": "error",
-            "message": f"Failed to test ChromaDB v2: {str(e)}"
+            "message": f"Failed to test ChromaDB: {str(e)}"
         }
 
 
