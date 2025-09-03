@@ -4,393 +4,335 @@ import os
 import sys
 import requests
 import chromadb
-from typing import List, Dict
+from typing import List, Dict, Optional, Iterable, Set
 from dotenv import load_dotenv
 from datetime import datetime
-from openai import OpenAI
 from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
 
 load_dotenv()
 
 API_URL = "https://staging.crm.buildmapper.ai/api/v1/execute_query"
-headers = {
+HEADERS = {
     "API-Key": os.getenv("CRM_API_KEY"),
     "Content-Type": "application/json",
 }
+
+BATCH_SIZE = 90  # tune for your infra
 
 
 def fetch_data(query: str) -> List[Dict]:
     payload = {"query": query}
     try:
-        response = requests.post(API_URL, headers=headers, json=payload)
-        if response.status_code == 200:
-            data = response.json()
-            return data.get("result", {}).get("data", [])
-        else:
-            print(f"[ERROR] CRM API returned {response.status_code}: {response.text}")
-            return []
+        r = requests.post(API_URL, headers=HEADERS, json=payload, timeout=60)
+        r.raise_for_status()
+        data = r.json()
+        return data.get("result", {}).get("data", []) or []
     except requests.exceptions.RequestException as e:
-        print(f"[ERROR] Request error: {e}")
+        print(f"[ERROR] CRM API: {e}")
         return []
+
+
+def _ns_id(prefix: str, raw_id: str) -> str:
+    # Namespace collection IDs to avoid collisions between tables.
+    return f"{prefix}_{str(raw_id).strip()}"
 
 
 class LeadSimilarityAnalyzer:
     def __init__(self):
         load_dotenv()
 
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise ValueError("❌ Missing OPENAI_API_KEY in environment variables")
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not openai_api_key:
+            raise ValueError("❌ Missing OPENAI_API_KEY")
 
-        # ✅ OpenAI client for embeddings
-        self.client = OpenAI(api_key=api_key)
+        # Prefer Chroma Cloud via HttpClient if CHROMADB_CLOUD_HOST is set
 
-        # ✅ Configure Chroma Cloud client
+        self.chroma_client = None
         try:
+            print(f"[INFO] Connecting to Chroma Cloud ...")
             self.chroma_client = chromadb.CloudClient(
                 api_key=os.getenv('CHROMADB_API_KEY'),
                 tenant='d2d08375-42ea-4bac-854b-09bac5998a24',
                 database='Daily Digest'
             )
-            
-            # Create or get collection with OpenAI embedding function
-            self.collection = self.chroma_client.get_or_create_collection(
-                name="leads_collection",
-                embedding_function=OpenAIEmbeddingFunction(
-                    api_key=api_key,
-                    model_name="text-embedding-3-small"
-                )
-            )
-            print("[INFO] Connected to ChromaDB Cloud")
+            _ = self.chroma_client.list_collections()
+            print("[INFO] ✅ Chroma Cloud connected")
         except Exception as e:
-            print(f"[WARNING] Failed to connect to ChromaDB Cloud: {e}")
-            print("[INFO] Falling back to local ChromaDB (persistent)")
+            print(f"[WARNING] Cloud connect failed: {e}")
+
+        if self.chroma_client is None:
+            print("[INFO] Using local persistent ChromaDB at ./chroma_db")
             self.chroma_client = chromadb.PersistentClient(path="./chroma_db")
-            self.collection = self.chroma_client.get_or_create_collection(
-                name="leads_collection",
-                embedding_function=OpenAIEmbeddingFunction(
-                    api_key=api_key,
-                    model_name="text-embedding-3-small"
-                )
-            )
 
-    def test_connection(self):
-        """Test ChromaDB connection and return status"""
-        try:
-            # Try to get collection info
-            collection_info = self.collection.count()
-            
-            # Determine client type
-            if hasattr(self.chroma_client, '_identifier'):
-                client_type = "ChromaDB Cloud"
-            elif hasattr(self.chroma_client, '_path'):
-                client_type = "ChromaDB Local"
-            else:
-                client_type = "ChromaDB In-Memory"
-            
-            return {
-                "status": "connected",
-                "collection_name": "leads_collection",
-                "document_count": collection_info,
-                "client_type": client_type,
-                "api_version": "v1",
-                "storage_type": "Permanent Cloud Storage" if client_type == "ChromaDB Cloud" else "Local Storage"
-            }
-        except Exception as e:
-            return {"status": "error", "error": str(e)}
+        self.embedder = OpenAIEmbeddingFunction(
+            api_key=openai_api_key, model_name="text-embedding-3-small"
+        )
 
-    def verify_permanent_storage(self):
-        """Verify that embeddings are stored permanently and not duplicated"""
-        try:
-            # Get all stored embeddings
-            all_results = self.collection.get()
-            
-            # Check for duplicates by lead_id
-            lead_ids = []
-            duplicates = []
-            for lead_id in all_results['ids']:
-                if lead_id in lead_ids:
-                    duplicates.append(lead_id)
-                else:
-                    lead_ids.append(lead_id)
-            
-            # Group by lead_type and user_id
-            lead_types = {}
-            user_ids = {}
-            for i, metadata in enumerate(all_results['metadatas']):
-                lead_type = metadata.get("lead_type", "unknown")
-                user_id = metadata.get("user_id", "unknown")
-                
-                lead_types[lead_type] = lead_types.get(lead_type, 0) + 1
-                user_ids[user_id] = user_ids.get(user_id, 0) + 1
-            
-            return {
-                "status": "success",
-                "total_embeddings": len(all_results['ids']),
-                "unique_lead_ids": len(lead_ids),
-                "duplicate_lead_ids": len(duplicates),
-                "duplicates_found": duplicates[:10],  # Show first 10 duplicates
-                "lead_type_distribution": lead_types,
-                "user_id_distribution": user_ids,
-                "storage_verified": len(duplicates) == 0
-            }
-        except Exception as e:
-            return {"status": "error", "error": str(e)}
+        # Single collection for both sources, distinguished by metadata + namespaced IDs
+        self.collection = self.chroma_client.get_or_create_collection(
+            name="leads_collection", embedding_function=self.embedder
+        )
 
-    def _sanitize_metadata(self, metadata: Dict) -> Dict:
-        """Ensure metadata values are safe for storage"""
-        sanitized = {}
-        for k, v in metadata.items():
-            if v is None:
-                sanitized[k] = ""
-            else:
-                sanitized[k] = str(v) if not isinstance(v, (int, float, bool)) else v
-        return sanitized
+        # Warm the in-memory cache from storage (paginated)
+        self.cached_ids: Set[str] = set()
+        self._preload_all_ids()
 
-    def store_lead_embeddings(self, leads: List[Dict], lead_type: str, user_id: int):
-        stored_count = 0
-        skipped_count = 0
+    # ---------- Storage / Cache helpers ----------
 
-        for lead in leads:
-            lead_id = str(lead.get("id", "")).strip()
-            if not lead_id:
-                print(f"[WARNING] Missing Lead ID, skipping: {lead}")
-                skipped_count += 1
-                continue
-
-            # Check if already stored to avoid duplicates
+    def _preload_all_ids(self):
+        """Load *all* IDs from the collection using pagination."""
+        offset = 0
+        loaded = 0
+        while True:
             try:
-                # Search for existing embedding by lead_id in metadata
-                existing_results = self.collection.get(
-                    where={"lead_id": {"$eq": lead_id}}
-                )
-                if existing_results['ids']:
-                    print(f"[DEBUG] Embedding already exists for Lead ID {lead_id}, skipping...")
-                    skipped_count += 1
-                    continue
+                # Some versions support limit/offset; if not, this still returns something we can use
+                chunk = self.collection.get(limit=BATCH_SIZE, offset=offset)
+                ids = chunk.get("ids") or []
+                if not ids:
+                    break
+                self.cached_ids.update(ids)
+                loaded += len(ids)
+                offset += len(ids)
+                if len(ids) < BATCH_SIZE:
+                    break
+            except TypeError:
+                # Older servers might not support offset; fall back to single fetch
+                all_ = self.collection.get()
+                ids = all_.get("ids") or []
+                self.cached_ids.update(ids)
+                loaded = len(ids)
+                break
+        print(f"[INFO] Cache warmup complete: {loaded} IDs")
+
+    def _existing_ids(self, ids: Iterable[str]) -> Set[str]:
+        """Return the subset of ids that already exist in the collection."""
+        existing: Set[str] = set()
+        ids = list(ids)
+        for i in range(0, len(ids), BATCH_SIZE):
+            batch = ids[i : i + BATCH_SIZE]
+            try:
+                got = self.collection.get(ids=batch)
+                found = set(got.get("ids") or [])
+                existing.update(found)
             except Exception as e:
-                print(f"[DEBUG] Could not check for existing embedding for Lead ID {lead_id}: {e}")
+                print(f"[WARNING] get(ids=...) failed for batch {i}: {e}")
+        return existing
 
-            desc = lead.get("project_description", "")
-            if not desc.strip():
-                print(f"[WARNING] No description for Lead ID {lead_id}, skipping.")
-                skipped_count += 1
+    def _sanitize_metadata(self, md: Dict) -> Dict:
+        out = {}
+        for k, v in md.items():
+            if v is None:
+                out[k] = ""
+            else:
+                out[k] = v if isinstance(v, (int, float, bool)) else str(v)
+        return out
+
+    def _add_embeddings_if_missing(
+        self,
+        leads: List[Dict],
+        lead_type: str,     # "existing" or "new"
+        user_id: int,
+        id_prefix: str,     # "crm" or "pub"
+    ) -> int:
+        """
+        Adds embeddings only for leads whose namespaced IDs are not present.
+        Uses batched existence check -> zero re-embedding for existing vectors.
+        """
+        docs, metas, ids = [], [], []
+
+        # Prepare namespaced IDs and filter by existence in one go
+        candidate_ids = [_ns_id(id_prefix, lead.get("id", "")) for lead in leads]
+        # Filter out invalid ids or missing descriptions early
+        prepared = []
+        for lead, nsid in zip(leads, candidate_ids):
+            if not nsid or nsid.endswith("_"):
                 continue
+            desc = (lead.get("project_description") or "").strip()
+            if not desc:
+                continue
+            prepared.append((lead, nsid, desc))
 
-            metadata = self._sanitize_metadata(
+        if not prepared:
+            return 0
+
+        # Storage-level check (persists across runs)
+        missing = set(nsid for _, nsid, _ in prepared) - self._existing_ids(
+            [nsid for _, nsid, _ in prepared]
+        )
+        if not missing:
+            return 0
+
+        # Build final add lists only for missing
+        for lead, nsid, desc in prepared:
+            if nsid not in missing:
+                continue
+            md = self._sanitize_metadata(
                 {
-                    "lead_type": lead_type,
+                    "lead_type": lead_type,       # "existing" or "new"
                     "user_id": user_id,
                     "name": lead.get("name"),
                     "create_date": lead.get("create_date"),
-                    "lead_id": lead_id,
+                    "lead_id": str(lead.get("id", "")).strip(),
                     "stored_at": datetime.now().isoformat(),
                 }
             )
+            ids.append(nsid)
+            docs.append(desc)
+            metas.append(md)
 
+        added = 0
+        # Batch add to minimize roundtrips
+        for i in range(0, len(ids), BATCH_SIZE):
             try:
-                # Store embedding permanently in ChromaDB Cloud
+                j = i + BATCH_SIZE
                 self.collection.add(
-                    documents=[desc],
-                    metadatas=[metadata],
-                    ids=[lead_id],
+                    ids=ids[i:j], documents=docs[i:j], metadatas=metas[i:j]
                 )
-                stored_count += 1
-                print(f"[SUCCESS] Stored NEW embedding for Lead ID {lead_id} in ChromaDB Cloud")
+                added += (j - i)
             except Exception as e:
-                print(f"[ERROR] Failed to store embedding for Lead ID {lead_id}: {e}")
-                # Log more details for debugging
-                print(f"[DEBUG] Failed metadata: {metadata}")
-                print(f"[DEBUG] Failed document length: {len(desc) if desc else 'None'}")
-                skipped_count += 1
+                print(f"[ERROR] add() failed for [{i}:{j}]: {e}")
 
-        print(
-            f"[INFO] Embedding storage complete: {stored_count} NEW stored, {skipped_count} already existed/skipped"
-        )
-        return stored_count
+        # Update in-memory cache (best-effort)
+        self.cached_ids.update(ids)
+        if added:
+            print(f"[INFO] Embedded {added} new {'CRM' if id_prefix=='crm' else 'publish'} leads")
+        return added
 
-    def get_stored_leads(self, limit: int = 10):
-        try:
-            # Get all stored leads
-            all_results = self.collection.get()
-            
-            # Limit the results
-            limited_results = {
-                'ids': all_results['ids'][:limit],
-                'metadatas': all_results['metadatas'][:limit],
-                'documents': all_results['documents'][:limit] if 'documents' in all_results else []
-            }
-            
-            return [
-                {
-                    "lead_id": lead_id,
-                    "metadata": metadata,
-                    "content": document if 'documents' in all_results else "",
-                }
-                for lead_id, metadata, document in zip(
-                    limited_results['ids'], 
-                    limited_results['metadatas'], 
-                    limited_results.get('documents', [''] * len(limited_results['ids']))
-                )
-            ]
-        except Exception as e:
-            print(f"[ERROR] Failed to retrieve leads: {e}")
-            return {"error": str(e)}
-
-    def search_similar_leads(self, query: str, limit: int = 5):
-        try:
-            results = self.collection.query(
-                query_texts=[query],
-                n_results=limit
-            )
-            
-            return [
-                {
-                    "lead_id": lead_id,
-                    "metadata": metadata,
-                    "content": document if 'documents' in results else "",
-                }
-                for lead_id, metadata, document in zip(
-                    results['ids'][0], 
-                    results['metadatas'][0], 
-                    results.get('documents', [[''] * len(results['ids'][0])])[0]
-                )
-            ]
-        except Exception as e:
-            print(f"[ERROR] Failed to search leads: {e}")
-            return {"error": str(e)}
+    # ---------- Public API ----------
 
     def find_interest_matched_new_leads(
-        self, user_id: int, similarity_threshold: float = 0.7
+        self,
+        user_id: int,
+        lead_id: Optional[str] = None,
+        similarity_threshold: float = 0.7,
+        max_results: int = 3,
     ) -> List[Dict]:
-        existing_leads = fetch_data(
-            f"""
-            SELECT id, name, project_description, region 
-            FROM crm_lead 
-            WHERE project_description IS NOT NULL AND user_id = {user_id}
         """
-        )
+        Suggest similar leads in lead_publish that are NOT already in user's CRM.
+        - If lead_id is None: use ALL user's CRM leads as context.
+        - If lead_id is provided: use only that CRM lead as context.
+        Embeddings are ensured to exist but never re-computed for already-stored items.
+        """
 
-        if not existing_leads:
-            print("[WARNING] No existing leads found for this user.")
+        # ---- Fetch CRM context ----
+        if lead_id:
+            crm_leads = fetch_data(
+                f"""
+                SELECT id, name, project_description, create_date, region
+                FROM crm_lead
+                WHERE id = {lead_id} AND user_id = {user_id}
+                limit 100
+                """
+            )
+        else:
+            crm_leads = fetch_data(
+                f"""
+                SELECT id, name, project_description, create_date, region
+                FROM crm_lead
+                WHERE project_description IS NOT NULL AND user_id = {user_id}
+                limit 100
+                """
+            )
+
+        if not crm_leads:
+            print("[WARNING] No CRM leads found for this request.")
             return []
 
-        region = existing_leads[0].get("region")
+        crm_ids = {str(r["id"]) for r in crm_leads if r.get("id") is not None}
+        region = crm_leads[0].get("region")
+
+        # ---- Fetch candidate publish leads (exclude those already in CRM) ----
         new_leads = fetch_data(
             f"""
-            SELECT id, name, project_description, create_date, user_id, region 
-            FROM crm_lead 
-            WHERE project_description IS NOT NULL 
-              AND create_date >= NOW() - INTERVAL '24 hours' 
+            SELECT id, name, project_description, create_date, project_status, region
+            FROM lead_publish
+            WHERE project_description IS NOT NULL
+              AND project_status = 'In Review'
               AND region = '{region}'
-        """
+              limit 100
+            """
         )
+        new_leads = [r for r in new_leads if str(r.get("id")) not in crm_ids]
 
-        print(
-            f"[DEBUG] Found {len(existing_leads)} existing leads, {len(new_leads)} new leads."
-        )
-        
-        # Log ChromaDB collection info for debugging
-        try:
-            collection_count = self.collection.count()
-            print(f"[DEBUG] ChromaDB collection has {collection_count} total documents")
-        except Exception as e:
-            print(f"[WARNING] Could not get collection count: {e}")
+        print(f"[DEBUG] CRM leads in scope: {len(crm_leads)}, publish candidates: {len(new_leads)}")
 
-        self.store_lead_embeddings(existing_leads, "existing", user_id)
-        self.store_lead_embeddings(new_leads, "new", user_id)
+        # ---- Ensure embeddings exist (no re-embedding if already present) ----
+        self._add_embeddings_if_missing(crm_leads, "existing", user_id, id_prefix="crm")
+        self._add_embeddings_if_missing(new_leads, "new", user_id, id_prefix="pub")
 
-        matches = {}
-        for new_lead in new_leads:
-            if not new_lead.get("project_description"):
+        # ---- Match each publish lead against user's CRM embeddings ----
+        matches = []
+        for pub in new_leads:
+            desc = (pub.get("project_description") or "").strip()
+            if not desc:
                 continue
-
             try:
-                results = self.collection.query(
-                    query_texts=[new_lead["project_description"]],
-                    n_results=3,
-                    where={"$and": [
-                        {"lead_type": {"$eq": "existing"}},
-                        {"user_id": {"$eq": user_id}}
-                    ]}
+                res = self.collection.query(
+                    query_texts=[desc],
+                    n_results=max_results,
+                    where={
+                        "$and": [
+                            {"lead_type": {"$eq": "existing"}},
+                            {"user_id": {"$eq": user_id}},
+                        ]
+                    },
                 )
             except Exception as e:
-                print(f"[ERROR] ChromaDB query failed for new lead {new_lead['id']}: {e}")
-                # Fallback: try without where clause to get any results
-                try:
-                    results = self.collection.query(
-                        query_texts=[new_lead["project_description"]],
-                        n_results=3
-                    )
-                    print(f"[WARNING] Using fallback query without filters for lead {new_lead['id']}")
-                except Exception as fallback_e:
-                    print(f"[ERROR] Fallback query also failed for lead {new_lead['id']}: {fallback_e}")
-                    continue
-
-            best_match = None
-            best_similarity = 0
-            
-            # Validate results structure
-            if not results or 'distances' not in results or not results['distances'] or not results['distances'][0]:
-                print(f"[WARNING] Invalid results structure for lead {new_lead['id']}")
+                print(f"[ERROR] Query failed for publish lead {pub.get('id')}: {e}")
                 continue
-                
-            for i, score in enumerate(results['distances'][0]):
-                # Score is distance; lower = more similar
-                similarity = 1 - score
-                if similarity >= similarity_threshold and similarity > best_similarity:
-                    # Validate metadata exists
-                    if (results.get('metadatas') and 
-                        results['metadatas'][0] and 
-                        i < len(results['metadatas'][0])):
-                        
-                        best_similarity = similarity
-                        best_match = {
-                            "new_lead": new_lead,
-                            "matched_existing_lead_id": results['metadatas'][0][i].get("lead_id"),
-                            "similarity_score": round(similarity, 3),
-                        }
-                    else:
-                        print(f"[WARNING] Missing metadata for result {i} in lead {new_lead['id']}")
 
-            if best_match:
-                matches[new_lead["id"]] = best_match
+            dists = (res.get("distances") or [[]])[0]
+            metas = (res.get("metadatas") or [[]])[0]
+            if not dists:
+                continue
 
-        unique_matches = sorted(
-            matches.values(), key=lambda x: x["similarity_score"], reverse=True
-        )
-        return unique_matches[:3]
+            # Convert cosine distance -> similarity
+            best = None
+            best_sim = 0.0
+            for i, dist in enumerate(dists):
+                try:
+                    sim = 1.0 - float(dist)
+                except Exception:
+                    continue
+                if sim >= similarity_threshold and sim > best_sim:
+                    md = metas[i] if i < len(metas) else {}
+                    best_sim = sim
+                    best = {
+                        "new_lead": pub,
+                        "matched_existing_lead_id": md.get("lead_id"),
+                        "similarity_score": round(sim, 3),
+                    }
+
+            if best:
+                matches.append(best)
+
+        matches.sort(key=lambda x: x["similarity_score"], reverse=True)
+        return matches[:max_results]
 
 
 def main():
-    load_dotenv()
     analyzer = LeadSimilarityAnalyzer()
 
     if len(sys.argv) < 2:
-        print("Usage: python lead_similarity.py <user_id>")
+        print("Usage: python lead_similarity.py <user_id> [<lead_id>]")
         sys.exit(1)
 
-    try:
-        user_id = int(sys.argv[1])
-    except ValueError:
-        print("Error: User ID must be an integer.")
-        sys.exit(1)
+    user_id = int(sys.argv[1])
+    lead_id = sys.argv[2] if len(sys.argv) > 2 else None
 
-    matched_new_leads = analyzer.find_interest_matched_new_leads(
-        user_id, similarity_threshold=0.7
-    )
+    out = analyzer.find_interest_matched_new_leads(user_id, lead_id)
+    if not out:
+        print("No similar leads found.")
+        return
 
-    if not matched_new_leads:
-        print("No similar new leads found in the last 24 hours.")
-    else:
-        print(f"Top {len(matched_new_leads)} similar new leads:\n")
-        for match in matched_new_leads:
-            lead = match["new_lead"]
-            print(
-                f" - New Lead ID: {lead['id']}, Name: {lead.get('name', 'N/A')}, "
-                f"Matched with Existing Lead ID: {match['matched_existing_lead_id']}, "
-                f"Similarity: {match['similarity_score']}"
-            )
+    print(f"Top {len(out)} matches:")
+    for m in out:
+        nl = m["new_lead"]
+        print(
+            f" - New Lead {nl['id']} ({nl.get('name','N/A')}) "
+            f"matched with CRM Lead {m['matched_existing_lead_id']} "
+            f"(Similarity {m['similarity_score']})"
+        )
 
 
 if __name__ == "__main__":

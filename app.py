@@ -35,41 +35,45 @@ def run_in_executor(func, *args, **kwargs):
     return loop.run_in_executor(None, partial(func, *args, **kwargs))
 
 
-async def get_all_data_parallel(user_id: int):
+async def get_all_data_parallel(user_id: int, lead_id: str = None):
     """Fetch all data in parallel using ThreadPoolExecutor for better performance"""
     start_time = time.time()
+    print(f"\n[DEBUG] ===== Starting get_all_data_parallel =====")
+    print(f"[DEBUG] Parameters: user_id={user_id}, lead_id={lead_id}")
     
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
             # Create tasks for parallel execution
             digest_task = run_in_executor(get_digest, user_id)
-            leads_task = run_in_executor(LeadSimilarityAnalyzer().find_interest_matched_new_leads, user_id, 0.7)
+            # Pass lead_id to the similar leads function if provided
+            if lead_id:
+                leads_task = run_in_executor(LeadSimilarityAnalyzer().find_interest_matched_new_leads, user_id, lead_id, 0.7, 3)
+            else:
+                leads_task = run_in_executor(LeadSimilarityAnalyzer().find_interest_matched_new_leads, user_id, None, 0.7, 3)
             emails_task = run_in_executor(EmailActivityFetcher().get_emails_clean, user_id)
             
             # Execute all tasks concurrently and wait for all to complete
+            print(f"[DEBUG] Executing parallel tasks...")
             results = await asyncio.gather(
-                digest_task, leads_task, emails_task,
+                digest_task,leads_task, emails_task,
                 return_exceptions=True
             )
             
             # Handle any exceptions that occurred during execution
             digest_output, similar_matches, emails_data = results
+            print(f"[DEBUG] Parallel execution completed. Results types: digest={type(digest_output)}, leads={type(similar_matches)}, emails={type(emails_data)}")
             
             # Check for exceptions and provide fallbacks
             if isinstance(digest_output, Exception):
-                print(f"Error in digest: {digest_output}")
+                print(f"[ERROR] Error in digest: {digest_output}")
                 digest_output = {"error": "Failed to fetch digest data"}
             
-            if isinstance(similar_matches, Exception):
-                print(f"Error in leads: {similar_matches}")
-                similar_matches = []
-            
             if isinstance(emails_data, Exception):
-                print(f"Error in emails: {emails_data}")
+                print(f"[ERROR] Error in emails: {emails_data}")
                 emails_data = []
             
             end_time = time.time()
-            print(f"Parallel execution completed in {end_time - start_time:.2f} seconds")
+            print(f"[DEBUG] Parallel execution completed in {end_time - start_time:.2f} seconds")
             
             return {
                 "digest_data": digest_output,
@@ -84,7 +88,10 @@ async def get_all_data_parallel(user_id: int):
         try:
             print("Falling back to sequential execution...")
             digest_output = get_digest(user_id)
-            similar_matches = LeadSimilarityAnalyzer().find_interest_matched_new_leads(user_id, 0.7)
+            if lead_id:
+                similar_matches = LeadSimilarityAnalyzer().find_interest_matched_new_leads(user_id, lead_id, 0.7, 5)
+            else:
+                similar_matches = LeadSimilarityAnalyzer().find_interest_matched_new_leads(user_id, None, 0.7, 5)
             emails_data = EmailActivityFetcher().get_emails_clean(user_id)
             
             return {
@@ -109,10 +116,10 @@ async def index(request: Request):
 
 
 @app.post("/submit", response_class=HTMLResponse)
-async def submit(request: Request, user_id: int = Form(...)):
+async def submit(request: Request, user_id: int = Form(...), lead_id: str = Form(None)):
     try:
-        # Get all data in parallel
-        all_data = await get_all_data_parallel(user_id)
+        # Get all data in parallel (with optional lead_id)
+        all_data = await get_all_data_parallel(user_id, lead_id)
         
         return templates.TemplateResponse("digest.html", {
             "request": request,
@@ -120,7 +127,8 @@ async def submit(request: Request, user_id: int = Form(...)):
             "digest_data": all_data["digest_data"],
             "similar_leads_data": all_data["similar_leads_data"],
             "emails_data": all_data["emails_data"],
-            "execution_time": all_data.get("execution_time", "unknown")
+            "execution_time": all_data.get("execution_time", "unknown"),
+            "search_lead_id": lead_id  # Pass the lead_id to the template
         })
     except Exception as e:
         import traceback
@@ -138,79 +146,6 @@ async def submit(request: Request, user_id: int = Form(...)):
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
-
-
-@app.get("/test-chromadb")
-async def test_chromadb():
-    """Test ChromaDB connection with ChromaDB Cloud + Local fallback"""
-    try:
-        from lead_similarity import LeadSimilarityAnalyzer
-        
-        analyzer = LeadSimilarityAnalyzer()
-        connection_status = analyzer.test_connection()
-        
-        return {
-            "status": "success",
-            "chromadb_status": connection_status,
-            "message": "ChromaDB connection test completed",
-            "integration": "ChromaDB Cloud + Local fallback",
-            "embedding_model": "OpenAI text-embedding-3-small",
-            "storage": "Cloud (preferred) / Local (fallback)"
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": f"Failed to test ChromaDB: {str(e)}"
-        }
-
-
-@app.get("/test-openai")
-async def test_openai():
-    """Test OpenAI client initialization"""
-    try:
-        from openai import OpenAI
-        
-        # Test basic OpenAI client
-        client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-        
-        return {
-            "status": "success",
-            "message": "OpenAI client initialized successfully",
-            "api_key_length": len(os.getenv('OPENAI_API_KEY', '')),
-            "embedding_models": [
-                "text-embedding-3-small",
-                "text-embedding-3-large", 
-                "text-embedding-ada-002"
-            ]
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": f"OpenAI client initialization failed: {str(e)}",
-            "error_type": type(e).__name__
-        }
-
-@app.get("/verify-storage")
-async def verify_storage():
-    """Verify that embeddings are stored permanently in ChromaDB Cloud"""
-    try:
-        from lead_similarity import LeadSimilarityAnalyzer
-        
-        analyzer = LeadSimilarityAnalyzer()
-        storage_verification = analyzer.verify_permanent_storage()
-        
-        return {
-            "status": "success",
-            "storage_verification": storage_verification,
-            "message": "Storage verification completed",
-            "note": "This checks for duplicate embeddings and verifies permanent storage"
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": f"Failed to verify storage: {str(e)}"
-        }
-
 
 if __name__ == "__main__":
     # For production deployment on Render

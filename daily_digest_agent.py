@@ -27,7 +27,7 @@ def fetch_data(query):
         return [{"error": f"An error occurred during the request: {e}"}]
 
 
-def get_upcoming_meetings(calendar_events, hours=24):
+def get_upcoming_meetings(calendar_events, hours=72):
     now = datetime.now()
     upcoming = []
     for event in calendar_events:
@@ -130,7 +130,7 @@ def get_digest(user_id):
     calendar_events = calendar_events_data
 
     crm_leads_data = fetch_data(
-        f"SELECT id, name, priority, builder_company, builder_partner_id, date_deadline, expected_revenue FROM crm_lead WHERE user_id = {user_id}"
+        f"SELECT id, name, priority, builder_company, builder_partner_id, date_deadline, expected_revenue FROM crm_lead WHERE user_id = {user_id} AND active = 'true'"
     )
     if crm_leads_data and len(crm_leads_data) > 0 and "error" in crm_leads_data[0]:
         digest_data["errors"].append(crm_leads_data[0]["error"])

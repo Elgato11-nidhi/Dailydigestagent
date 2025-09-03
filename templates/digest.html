@@ -686,6 +686,26 @@
                     🔍
                     <h2>Similar Leads</h2>
                 </div>
+                <div style="padding: 1rem; border-bottom: 1px solid var(--border-color);">
+                    <input type="text" id="similar-leads-search" placeholder="Enter Lead ID to find similar leads (e.g., 1131)" 
+                           style="width: 100%; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 6px; font-size: 0.9rem; box-sizing: border-box;"
+                           onkeypress="handleLeadSearch(event)">
+                    <button onclick="searchSimilarLeads()" 
+                            style="margin-top: 0.5rem; background: var(--primary-gradient); color: white; padding: 0.5rem 1rem; border: none; border-radius: 6px; font-size: 0.9rem; cursor: pointer; transition: all 0.2s ease;">
+                        🔍 Search Similar Leads
+                    </button>
+                    {% if search_lead_id %}
+                    <div style="margin-top: 0.5rem; padding: 0.5rem; background-color: #f0fdf4; border: 1px solid #a7f3d0; border-radius: 6px; font-size: 0.8rem; color: #065f46;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span><strong>Searching for:</strong> Lead ID {{ search_lead_id }}</span>
+                            <button onclick="clearSearch()" 
+                                    style="background: #dc2626; color: white; padding: 0.25rem 0.5rem; border: none; border-radius: 4px; font-size: 0.7rem; cursor: pointer;">
+                                ✕ Clear Search
+                            </button>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
                 <div class="card-content">
                     {% if similar_leads_data %}
                     {% for item in similar_leads_data %}
@@ -723,6 +743,112 @@
         function openEmailGenerator(leadId, userId) {
             const yourAppUrl = `https://visionary-empanada-0ba1aa.netlify.app/?leadId=${leadId}&userId=${userId}`;     
             window.open(yourAppUrl, 'generateEmailPopup', 'width=1200,height=900');
+        }
+
+        function handleLeadSearch(event) {
+            if (event.key === 'Enter') {
+                searchSimilarLeads();
+            }
+        }
+
+        function searchSimilarLeads() {
+            const leadIdInput = document.getElementById('similar-leads-search');
+            const leadId = leadIdInput.value.trim();
+            
+            if (!leadId) {
+                alert('Please enter a Lead ID to search for similar leads.');
+                return;
+            }
+            
+            if (!/^\d+$/.test(leadId)) {
+                alert('Please enter a valid Lead ID (numbers only).');
+                return;
+            }
+            
+            // Show loading state
+            const button = event.target || document.querySelector('button[onclick="searchSimilarLeads()"]');
+            const originalText = button.textContent;
+            button.textContent = '🔍 Searching...';
+            button.disabled = true;
+            
+            // Add loading indicator to the page
+            const loadingDiv = document.createElement('div');
+            loadingDiv.id = 'search-loading';
+            loadingDiv.style.cssText = `
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                background: rgba(0, 0, 0, 0.8);
+                color: white;
+                padding: 1rem 2rem;
+                border-radius: 8px;
+                z-index: 1000;
+                font-size: 1rem;
+            `;
+            loadingDiv.innerHTML = '🔍 Searching for similar leads...';
+            document.body.appendChild(loadingDiv);
+            
+            // Create a hidden form and submit it to reload the page with new data
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/submit';
+            form.style.display = 'none';
+            
+            // Add user_id field
+            const userIdField = document.createElement('input');
+            userIdField.type = 'hidden';
+            userIdField.name = 'user_id';
+            userIdField.value = '{{ user_id }}';
+            form.appendChild(userIdField);
+            
+            // Add lead_id field
+            const leadIdField = document.createElement('input');
+            leadIdField.type = 'hidden';
+            leadIdField.name = 'lead_id';
+            leadIdField.value = leadId;
+            form.appendChild(leadIdField);
+            
+            // Add form to page and submit
+            document.body.appendChild(form);
+            form.submit();
+        }
+
+        function clearSearch() {
+            // Add loading indicator to the page
+            const loadingDiv = document.createElement('div');
+            loadingDiv.id = 'search-loading';
+            loadingDiv.style.cssText = `
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                background: rgba(0, 0, 0, 0.8);
+                color: white;
+                padding: 1rem 2rem;
+                border-radius: 8px;
+                z-index: 1000;
+                font-size: 1rem;
+            `;
+            loadingDiv.innerHTML = '🔄 Loading normal digest...';
+            document.body.appendChild(loadingDiv);
+            
+            // Create a hidden form to submit without lead_id (normal digest)
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/submit';
+            form.style.display = 'none';
+            
+            // Add only user_id field (no lead_id)
+            const userIdField = document.createElement('input');
+            userIdField.type = 'hidden';
+            userIdField.name = 'user_id';
+            userIdField.value = '{{ user_id }}';
+            form.appendChild(userIdField);
+            
+            // Add form to page and submit
+            document.body.appendChild(form);
+            form.submit();
         }
     </script>
 </body>
