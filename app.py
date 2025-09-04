@@ -26,7 +26,7 @@ if static_dir.exists():
 # Import after env vars are loaded
 from daily_digest_agent import get_digest
 from lead_similarity import LeadSimilarityAnalyzer
-from recent_emails import get_recent_emails_for_user
+from recent_emails import get_recent_emails_for_user_clean
 
 
 def run_in_executor(func, *args, **kwargs):
@@ -51,7 +51,7 @@ async def get_all_data_parallel(user_id: int, lead_id: str = None):
             else:
                 leads_task = run_in_executor(LeadSimilarityAnalyzer().find_interest_matched_new_leads, user_id, None, 0.7, 3)
             # Use recent_emails module which joins mail_message with crm_lead
-            emails_task = run_in_executor(get_recent_emails_for_user, user_id)
+            emails_task = run_in_executor(get_recent_emails_for_user_clean, user_id)
             
             # Execute all tasks concurrently and wait for all to complete
             print(f"[DEBUG] Executing parallel tasks...")
@@ -102,7 +102,7 @@ async def get_all_data_parallel(user_id: int, lead_id: str = None):
                 similar_matches = LeadSimilarityAnalyzer().find_interest_matched_new_leads(user_id, lead_id, 0.7, 5)
             else:
                 similar_matches = LeadSimilarityAnalyzer().find_interest_matched_new_leads(user_id, None, 0.7, 5)
-            emails_data = get_recent_emails_for_user(user_id)
+            emails_data = get_recent_emails_for_user_clean(user_id)
             
             return {
                 "digest_data": digest_output,
