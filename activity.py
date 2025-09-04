@@ -11,9 +11,9 @@ load_dotenv()
 
 class EmailActivityFetcher:
     def __init__(self):
-        self.api_url = "https://staging.crm.buildmapper.ai/api/v1/execute_query"
+        self.api_url = "https://crm.buildmapper.ai/api/v1/execute_query"
         self.headers = {
-            "API-Key": os.getenv('CRM_API_KEY'),
+            "API-Key": os.getenv('PROD_CRM_API_KEY'),
             "Content-Type": "application/json"
         }
     

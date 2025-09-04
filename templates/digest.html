@@ -620,12 +620,14 @@
                     <h2>Deadlines Soon</h2>
                 </div>
                 <div class="card-content">
-                    {% if digest_data.deadlines_soon %}
+                    {% if digest_data.deadlines_soon or digest_data.activity_deadlines_soon %}
                     <ul class="digest-list">
+                        <!-- Lead Deadlines -->
                         {% for deadline in digest_data.deadlines_soon %}
                         <li class="deadline-item priority-{{ deadline.priority|int }}">
                             <div class="deadline-header">
                                 <strong>{{ deadline.name }}</strong>
+                                <span class="deadline-type-badge lead">Lead</span>
                                 {% if deadline.priority|int > 0 %}
                                 <span class="priority-badge high">P{{ deadline.priority }}</span>
                                 {% endif %}
