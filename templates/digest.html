@@ -665,9 +665,6 @@
                             <div class="email-from">
                                 <strong>From:</strong> {{ email.author_name or 'Unknown Sender' }}
                             </div>
-                            <div class="email-to">
-                                <strong>To:</strong> {{ email.user_name or 'Unknown Recipient' }}
-                            </div>
                         </div>
                         {% if email.body %}
                         <div class="email-body">
