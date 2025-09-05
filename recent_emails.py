@@ -34,7 +34,7 @@ def fetch_data(query: str, debug: bool = False) -> List[Dict]:
         return []
 
 
-def get_recent_emails_for_user(user_id: int, hours: int = 72, debug: bool = False) -> List[Dict]:
+def get_recent_emails_for_user(user_id: int, debug: bool = False) -> List[Dict]:
     """
     Fetch recent emails (last 72 hours) from mail_message where:
       - message_type = 'email'
@@ -51,7 +51,6 @@ def get_recent_emails_for_user(user_id: int, hours: int = 72, debug: bool = Fals
         return []
     # Build query: latest email per lead (res_id) in last 72 hours for this user.
     # Simple single SELECT with NOT EXISTS per res_id (no CTEs / window functions).
-    interval_hours = max(1, int(hours))
     query = f"""
         SELECT 
             mm.id AS message_id,
@@ -65,25 +64,27 @@ def get_recent_emails_for_user(user_id: int, hours: int = 72, debug: bool = Fals
             mm.res_id,
             cl.id AS lead_id,
             cl.name AS lead_name,
-            cl.user_id AS lead_user_id
+            cl.user_id AS lead_user_id,
+            mm.create_uid
         FROM mail_message mm
         JOIN crm_lead cl ON mm.model = 'crm.lead' AND mm.res_id = cl.id
         WHERE mm.message_type = 'email'
           AND mm.model = 'crm.lead'
-          AND mm.date >= NOW() - INTERVAL '{interval_hours} hours'
+          AND mm.date >= NOW() - INTERVAL '72 hours'
           AND cl.user_id = {user_id}
+          AND mm.create_uid != {user_id}
+          -- ensure it's the latest message for that lead
           AND NOT EXISTS (
               SELECT 1
               FROM mail_message mm2
               WHERE mm2.model = 'crm.lead'
-                AND mm2.message_type = 'email'
+                AND mm2.message_type = 'comment'
                 AND mm2.res_id = mm.res_id
                 AND (
                     mm2.date > mm.date OR (mm2.date = mm.date AND mm2.id > mm.id)
-                )
+            )
           )
         ORDER BY mm.date DESC
-        LIMIT 200
     """
 
     rows = fetch_data(query, debug=debug)
@@ -100,9 +101,9 @@ def get_recent_emails_for_user(user_id: int, hours: int = 72, debug: bool = Fals
             "model": row.get("model"),
             "record_name": row.get("lead_name"),
             "lead_id": row.get("lead_id"),
+            "create_uid": row.get("create_uid"),
         })
     return emails
-
 
 def _strip_html(html_text: str) -> str:
     if not html_text:
@@ -157,11 +158,11 @@ def clean_email_body(body: str, max_len: int = 300) -> str:
     return text
 
 
-def get_recent_emails_for_user_clean(user_id: int, hours: int = 72, body_preview_chars: int = 300, debug: bool = False) -> List[Dict]:
+def get_recent_emails_for_user_clean(user_id: int, body_preview_chars: int = 300, debug: bool = False) -> List[Dict]:
     """
     Convenience wrapper that also strips HTML, cleans the body, and enriches with author/user names.
     """
-    emails = get_recent_emails_for_user(user_id, hours=hours, debug=debug)
+    emails = get_recent_emails_for_user(user_id, debug=debug)
     
     # Get user's name once
     user_name = get_user_name(user_id, debug=debug)
@@ -196,24 +197,18 @@ def main():
 
     # flags
     use_clean = False
-    hours = 72
     debug_flag = False
 
     for arg in sys.argv[2:]:
         if arg == "--clean":
             use_clean = True
-        elif arg.startswith("--hours="):
-            try:
-                hours = int(arg.split("=", 1)[1])
-            except ValueError:
-                pass
         elif arg == "--debug":
             debug_flag = True
 
     if use_clean:
-        result = get_recent_emails_for_user_clean(user_id, hours=hours, debug=debug_flag)
+        result = get_recent_emails_for_user_clean(user_id, debug=debug_flag)
     else:
-        result = get_recent_emails_for_user(user_id, hours=hours, debug=debug_flag)
+        result = get_recent_emails_for_user(user_id, debug=debug_flag)
 
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
