@@ -114,18 +114,73 @@ def _strip_html(html_text: str) -> str:
     return text
 
 
+def get_user_name(user_id: int, debug: bool = False) -> str:
+    """Fetches the name of a user from res_users."""
+    query = f"SELECT name FROM res_users WHERE id = {user_id} LIMIT 1"
+    rows = fetch_data(query, debug=debug)
+    return rows[0].get("name") if rows else "Unknown User"
+
+
+def get_author_name(author_id: int, debug: bool = False) -> str:
+    """Fetches the name of an author from res_partner."""
+    query = f"SELECT name FROM res_partner WHERE id = {author_id} LIMIT 1"
+    rows = fetch_data(query, debug=debug)
+    return rows[0].get("name") if rows else "Unknown Author"
+
+
+def clean_email_body(body: str, max_len: int = 300) -> str:
+    """
+    Cleans the email body by removing quoted replies and truncating.
+    """
+    if not body:
+        return ""
+    
+    # Strip HTML tags first
+    text = _strip_html(body)
+    
+    # Remove quoted replies (e.g., "On ... wrote:")
+    text = re.split(r"On .* wrote:", text, flags=re.IGNORECASE)[0]
+    
+    # Additional common reply patterns
+    text = re.split(r"From:.*", text, flags=re.IGNORECASE)[0]
+    text = re.split(r"Sent from my.*", text, flags=re.IGNORECASE)[0]
+    
+    # Remove long signature-like separators
+    text = re.sub(r"_{10,}", "", text)
+    
+    # Normalize whitespace and strip
+    text = re.sub(r"\s+", " ", text).strip()
+    
+    # Truncate if necessary
+    if len(text) > max_len:
+        return text[:max_len] + "..."
+    return text
+
+
 def get_recent_emails_for_user_clean(user_id: int, hours: int = 72, body_preview_chars: int = 300, debug: bool = False) -> List[Dict]:
-    """Convenience wrapper that also strips HTML and truncates body for display."""
+    """
+    Convenience wrapper that also strips HTML, cleans the body, and enriches with author/user names.
+    """
     emails = get_recent_emails_for_user(user_id, hours=hours, debug=debug)
+    
+    # Get user's name once
+    user_name = get_user_name(user_id, debug=debug)
+    
     cleaned: List[Dict] = []
     for e in emails:
-        body_plain = _strip_html(e.get("body", ""))
-        if len(body_plain) > body_preview_chars:
-            body_plain = body_plain[:body_preview_chars] + "..."
+        # Clean the email body
+        body_cleaned = clean_email_body(e.get("body", ""), max_len=body_preview_chars)
+        
+        # Get author's name
+        author_name = get_author_name(e.get("author_id"), debug=debug)
+        
         cleaned.append({
             **e,
-            "body": body_plain,
+            "body": body_cleaned,
+            "user_name": user_name,
+            "author_name": author_name,
         })
+        
     return cleaned
 
 
