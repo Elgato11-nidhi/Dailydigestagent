@@ -720,14 +720,6 @@
                             {{ item['new_lead']['project_description'] }}
                         </div>
                         {% endif %}
-                        <button class="generate-email-btn"
-                                data-lead-id="{{ item.new_lead.id }}"
-                                data-user-id="{{ user_id }}"
-                                onclick="openEmailGenerator(this.dataset.leadId, this.dataset.userId)">
-                            Generate Email
-                        </button>
-
-
                     </div>
                     {% endfor %}
                     {% else %}
@@ -739,11 +731,6 @@
 
     </div>
     <script>
-        function openEmailGenerator(leadId, userId) {
-            const yourAppUrl = `https://visionary-empanada-0ba1aa.netlify.app/?leadId=${leadId}&userId=${userId}`;     
-            window.open(yourAppUrl, 'generateEmailPopup', 'width=1200,height=900');
-        }
-
         function handleLeadSearch(event) {
             if (event.key === 'Enter') {
                 searchSimilarLeads();
