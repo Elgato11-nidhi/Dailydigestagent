@@ -1,6 +1,7 @@
 # app/lead_similarity.py
 
 import os
+import time
 import sys
 import requests
 import chromadb
@@ -185,6 +186,7 @@ class LeadSimilarityAnalyzer:
         for i in range(0, len(ids), BATCH_SIZE):
             try:
                 j = i + BATCH_SIZE
+                print(f"[INFO] Embedding {j - i} leads to ChromaDB...")
                 self.collection.add(
                     ids=ids[i:j], documents=docs[i:j], metadatas=metas[i:j]
                 )
@@ -213,6 +215,7 @@ class LeadSimilarityAnalyzer:
         - If lead_id is provided: use only that CRM lead as context.
         Embeddings are ensured to exist but never re-computed for already-stored items.
         """
+        start_time = time.time()
 
         # ---- Fetch CRM context ----
         if lead_id:
@@ -233,6 +236,7 @@ class LeadSimilarityAnalyzer:
                 limit 100
                 """
             )
+        print(f"[INFO] Time to fetch CRM leads: {time.time() - start_time:.2f}s")
 
         if not crm_leads:
             print("[WARNING] No CRM leads found for this request.")
@@ -242,6 +246,7 @@ class LeadSimilarityAnalyzer:
         region = crm_leads[0].get("region")
 
         # ---- Fetch candidate publish leads (exclude those already in CRM) ----
+        fetch_new_leads_start_time = time.time()
         new_leads = fetch_data(
             f"""
             SELECT id, name, project_description, create_date, project_status, region
@@ -253,14 +258,18 @@ class LeadSimilarityAnalyzer:
             """
         )
         new_leads = [r for r in new_leads if str(r.get("id")) not in crm_ids]
+        print(f"[INFO] Time to fetch new leads: {time.time() - fetch_new_leads_start_time:.2f}s")
 
         print(f"[DEBUG] CRM leads in scope: {len(crm_leads)}, publish candidates: {len(new_leads)}")
 
         # ---- Ensure embeddings exist (no re-embedding if already present) ----
+        embedding_start_time = time.time()
         self._add_embeddings_if_missing(crm_leads, "existing", user_id, id_prefix="crm")
         self._add_embeddings_if_missing(new_leads, "new", user_id, id_prefix="pub")
+        print(f"[INFO] Time to ensure embeddings: {time.time() - embedding_start_time:.2f}s")
 
         # ---- Match each publish lead against user's CRM embeddings ----
+        matching_start_time = time.time()
         matches = []
         for pub in new_leads:
             desc = (pub.get("project_description") or "").strip()
@@ -305,6 +314,8 @@ class LeadSimilarityAnalyzer:
 
             if best:
                 matches.append(best)
+        
+        print(f"[INFO] Time to match leads: {time.time() - matching_start_time:.2f}s")
 
         matches.sort(key=lambda x: x["similarity_score"], reverse=True)
         return matches[:max_results]
